@@ -1,4 +1,6 @@
 import os
+import json
+import base64
 import unicodedata
 from uuid import uuid4
 from datetime import datetime
@@ -42,9 +44,14 @@ app.add_middleware(
 # --- Google Drive ---
 
 def get_drive_service():
-    credentials = service_account.Credentials.from_service_account_file(
-        CREDENTIALS_PATH, scopes=SCOPES
-    )
+    credentials_b64 = os.getenv("GOOGLE_CREDENTIALS_JSON")
+    if credentials_b64:
+        info = json.loads(base64.b64decode(credentials_b64))
+        credentials = service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
+    else:
+        credentials = service_account.Credentials.from_service_account_file(
+            os.getenv("GOOGLE_CREDENTIALS_PATH"), scopes=SCOPES
+        )
     return build("drive", "v3", credentials=credentials)
 
 
