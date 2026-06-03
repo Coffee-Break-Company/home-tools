@@ -1,14 +1,13 @@
 import os
 import unicodedata
-import yaml
 from uuid import uuid4
 from datetime import datetime
-from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from supabase import create_client
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
@@ -17,8 +16,7 @@ load_dotenv()
 CREDENTIALS_PATH = os.getenv("GOOGLE_CREDENTIALS_PATH")
 SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 
-DATA_DIR = Path(__file__).parent.parent / "data"
-BILLS_FILE = DATA_DIR / "bills.yaml"
+supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 
 MONTHS_PT = [
     "janeiro", "fevereiro", "marco", "abril", "maio", "junho",
@@ -39,21 +37,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-# --- YAML storage ---
-
-def load_bills() -> list[dict]:
-    if not BILLS_FILE.exists():
-        return []
-    with open(BILLS_FILE) as f:
-        return yaml.safe_load(f) or []
-
-
-def save_bills(bills: list[dict]):
-    DATA_DIR.mkdir(exist_ok=True)
-    with open(BILLS_FILE, "w", encoding="utf-8") as f:
-        yaml.dump(bills, f, allow_unicode=True, default_flow_style=False)
 
 
 # --- Google Drive ---
@@ -100,31 +83,30 @@ def health():
 
 @app.get("/api/bills")
 def get_bills():
-    return load_bills()
+    res = supabase.table("bills").select("*").execute()
+    return res.data
 
 
 @app.post("/api/bills", status_code=201)
 def create_bill(bill: BillCreate):
-    bills = load_bills()
-    new_bill = {"id": str(uuid4()), **bill.model_dump()}
-    bills.append(new_bill)
-    save_bills(bills)
-    return new_bill
+    res = supabase.table("bills").insert({
+        "id": str(uuid4()),
+        **bill.model_dump(),
+    }).execute()
+    return res.data[0]
 
 
 @app.delete("/api/bills/{bill_id}")
 def delete_bill(bill_id: str):
-    bills = load_bills()
-    updated = [b for b in bills if b["id"] != bill_id]
-    if len(updated) == len(bills):
+    res = supabase.table("bills").delete().eq("id", bill_id).execute()
+    if not res.data:
         raise HTTPException(status_code=404, detail="Not found")
-    save_bills(updated)
     return {"ok": True}
 
 
 @app.get("/api/bills/status")
 def get_bills_status():
-    bills = load_bills()
+    bills = supabase.table("bills").select("*").execute().data
     month = datetime.now().month
     return [
         {**bill, "paid": check_payment_exists(bill["drive_folder_id"], month)}
