@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { ManageBillsModal } from '@/components/ManageBillsModal'
+import { api } from '@/lib/api'
 
 type Bill = {
   id: string
@@ -39,7 +40,7 @@ export function Bills() {
   async function fetchStatus() {
     setLoading(true)
     try {
-      const res = await fetch('/api/bills/status')
+      const res = await api.get('/api/bills/status')
       setBills(await res.json())
     } finally {
       setLoading(false)

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Trash2 } from 'lucide-react'
+import { api } from '@/lib/api'
 import {
   Dialog,
   DialogContent,
@@ -29,7 +30,7 @@ export function ManageBillsModal({ open, onClose, onRefresh }: Props) {
   const [submitting, setSubmitting] = useState(false)
 
   async function fetchBills() {
-    const res = await fetch('/api/bills')
+    const res = await api.get('/api/bills')
     setBills(await res.json())
   }
 
@@ -37,11 +38,7 @@ export function ManageBillsModal({ open, onClose, onRefresh }: Props) {
     e.preventDefault()
     if (!form.name || !form.due_day || !form.drive_folder_id) return
     setSubmitting(true)
-    await fetch('/api/bills', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...form, due_day: Number(form.due_day) }),
-    })
+    await api.post('/api/bills', { ...form, due_day: Number(form.due_day) })
     setForm(emptyForm)
     await fetchBills()
     onRefresh()
@@ -49,7 +46,7 @@ export function ManageBillsModal({ open, onClose, onRefresh }: Props) {
   }
 
   async function handleDelete(id: string) {
-    await fetch(`/api/bills/${id}`, { method: 'DELETE' })
+    await api.delete(`/api/bills/${id}`)
     await fetchBills()
     onRefresh()
   }
