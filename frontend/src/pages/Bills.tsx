@@ -1,38 +1,52 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronLeft, Settings2, Zap, Droplets, Wifi, Building2, Flame, ShoppingCart, CheckCircle2, Circle } from 'lucide-react'
+import {
+  ChevronLeft, Settings2, Zap, Droplets, Wifi, Building2,
+  Flame, ShoppingCart, Receipt, CheckCircle2, Circle,
+  type LucideIcon,
+} from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
-import { type LucideIcon } from 'lucide-react'
+import { ManageBillsModal } from '@/components/ManageBillsModal'
 
 type Bill = {
-  id: number
+  id: string
   name: string
-  icon: LucideIcon
-  dueDay: number
-  dueMonth: number
+  due_day: number
+  drive_folder_id: string
   paid: boolean
 }
 
 const MONTH_NAMES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
 
-const initialBills: Bill[] = [
-  { id: 1, name: 'Aluguel',      icon: Building2,    dueDay: 5,  dueMonth: 6, paid: true  },
-  { id: 2, name: 'Condomínio',   icon: Building2,    dueDay: 10, dueMonth: 6, paid: true  },
-  { id: 3, name: 'Energia',      icon: Zap,          dueDay: 12, dueMonth: 6, paid: false },
-  { id: 4, name: 'Água',         icon: Droplets,     dueDay: 15, dueMonth: 6, paid: false },
-  { id: 5, name: 'Internet',     icon: Wifi,         dueDay: 18, dueMonth: 6, paid: false },
-  { id: 6, name: 'Gás',          icon: Flame,        dueDay: 20, dueMonth: 6, paid: false },
-  { id: 7, name: 'Supermercado', icon: ShoppingCart, dueDay: 25, dueMonth: 6, paid: false },
-]
+function iconForBill(name: string): LucideIcon {
+  const n = name.toLowerCase()
+  if (n.includes('energia') || n.includes('luz')) return Zap
+  if (n.includes('água') || n.includes('agua')) return Droplets
+  if (n.includes('internet') || n.includes('wifi')) return Wifi
+  if (n.includes('aluguel') || n.includes('condomínio') || n.includes('condominio')) return Building2
+  if (n.includes('gás') || n.includes('gas')) return Flame
+  if (n.includes('mercado') || n.includes('compra')) return ShoppingCart
+  return Receipt
+}
 
 export function Bills() {
-  const [bills, setBills] = useState<Bill[]>(initialBills)
+  const [bills, setBills] = useState<Bill[]>([])
+  const [loading, setLoading] = useState(true)
+  const [modalOpen, setModalOpen] = useState(false)
 
-  function togglePaid(id: number) {
-    setBills((prev) =>
-      prev.map((b) => (b.id === id ? { ...b, paid: !b.paid } : b))
-    )
+  const currentMonth = new Date().getMonth()
+
+  async function fetchStatus() {
+    setLoading(true)
+    try {
+      const res = await fetch('/api/bills/status')
+      setBills(await res.json())
+    } finally {
+      setLoading(false)
+    }
   }
+
+  useEffect(() => { fetchStatus() }, [])
 
   const paid = bills.filter((b) => b.paid).length
 
@@ -51,51 +65,85 @@ export function Bills() {
             </Link>
             <div>
               <h1 className="text-xl font-semibold text-foreground">Contas de Casa</h1>
-              <p className="text-xs text-muted-foreground">{paid} de {bills.length} pagas</p>
+              <p className="text-xs text-muted-foreground">
+                {loading ? 'Verificando...' : `${paid} de ${bills.length} pagas`}
+              </p>
             </div>
           </div>
 
-          <button className="flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
+          <button
+            onClick={() => setModalOpen(true)}
+            className="flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+          >
             <Settings2 className="size-4" strokeWidth={1.5} />
             Gerenciar
           </button>
         </div>
 
-        {/* Bill list */}
-        <div className="flex flex-col gap-2">
-          {bills.map((bill) => (
+        {/* Loading */}
+        {loading && (
+          <div className="flex flex-col gap-2">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="h-14 rounded-lg bg-card animate-pulse" />
+            ))}
+          </div>
+        )}
+
+        {/* Empty state */}
+        {!loading && bills.length === 0 && (
+          <div className="flex flex-col items-center gap-3 py-16 text-center">
+            <p className="text-sm text-muted-foreground">Nenhuma conta cadastrada.</p>
             <button
-              key={bill.id}
-              onClick={() => togglePaid(bill.id)}
-              className="flex w-full items-center gap-4 rounded-lg border border-border bg-card px-4 py-3.5 text-left transition-colors hover:bg-secondary"
+              onClick={() => setModalOpen(true)}
+              className="text-sm text-foreground underline underline-offset-4"
             >
-              <bill.icon
-                className="size-5 shrink-0 text-muted-foreground"
-                strokeWidth={1.5}
-              />
-
-              <span className="flex-1 text-sm font-medium text-foreground">{bill.name}</span>
-
-              <span className="text-xs text-muted-foreground">
-                Dia {bill.dueDay} {MONTH_NAMES[bill.dueMonth - 1]}
-              </span>
-
-              {bill.paid ? (
-                <Badge variant="secondary" className="flex items-center gap-1 text-xs font-normal text-emerald-400">
-                  <CheckCircle2 className="size-3.5" strokeWidth={1.5} />
-                  Pago
-                </Badge>
-              ) : (
-                <Badge variant="secondary" className="flex items-center gap-1 text-xs font-normal text-muted-foreground">
-                  <Circle className="size-3.5" strokeWidth={1.5} />
-                  Pendente
-                </Badge>
-              )}
+              Adicionar conta
             </button>
-          ))}
-        </div>
+          </div>
+        )}
+
+        {/* Bill list */}
+        {!loading && bills.length > 0 && (
+          <div className="flex flex-col gap-2">
+            {bills.map((bill) => {
+              const Icon = iconForBill(bill.name)
+              return (
+                <div
+                  key={bill.id}
+                  className="flex w-full items-center gap-4 rounded-lg border border-border bg-card px-4 py-3.5"
+                >
+                  <Icon className="size-5 shrink-0 text-muted-foreground" strokeWidth={1.5} />
+
+                  <span className="flex-1 text-sm font-medium text-foreground">{bill.name}</span>
+
+                  <span className="text-xs text-muted-foreground">
+                    Dia {bill.due_day} {MONTH_NAMES[currentMonth]}
+                  </span>
+
+                  {bill.paid ? (
+                    <Badge variant="secondary" className="flex items-center gap-1 text-xs font-normal text-emerald-400">
+                      <CheckCircle2 className="size-3.5" strokeWidth={1.5} />
+                      Pago
+                    </Badge>
+                  ) : (
+                    <Badge variant="secondary" className="flex items-center gap-1 text-xs font-normal text-muted-foreground">
+                      <Circle className="size-3.5" strokeWidth={1.5} />
+                      Pendente
+                    </Badge>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
 
       </div>
+
+      <ManageBillsModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        onRefresh={fetchStatus}
+      />
     </div>
   )
 }
