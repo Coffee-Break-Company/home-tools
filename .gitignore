@@ -219,7 +219,7 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Google service account credentials
-*.json
+controle-pagamentos-*.json
 
 # Local data (bills config, etc.)
 data/
