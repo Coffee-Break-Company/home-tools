@@ -2,33 +2,6 @@
 
 Ferramentas para gestão interna da casa.
 
-## Arquitetura
-
-```mermaid
-flowchart TD
-    Dev(["👨‍💻 Developer"])
-    GitHub["GitHub\nCoffee-Break-Company/home-tools"]
-    Vercel["Vercel\nFrontend — React + Vite"]
-    Render["Render\nBackend — FastAPI + Docker"]
-    Supabase[("Supabase\nPostgreSQL\nbills table")]
-    Drive["Google Drive\nPagamentos/{ano}/{conta}/{mês}"]
-    UptimeRobot["UptimeRobot\nping a cada 5min"]
-    User(["📱 User"])
-
-    Dev -->|"git push main"| GitHub
-
-    GitHub -->|"auto deploy\nfrontend/"| Vercel
-    GitHub -->|"auto deploy\nrender.yaml"| Render
-
-    User -->|"HTTPS"| Vercel
-    Vercel -->|"VITE_API_URL\n/api/*"| Render
-
-    Render -->|"bills CRUD"| Supabase
-    Render -->|"verifica comprovantes\nService Account"| Drive
-
-    UptimeRobot -->|"GET /health"| Render
-```
-
 ## Stack
 
 | Camada | Tecnologia |
