@@ -19,7 +19,7 @@ type Bill = {
 
 const MONTH_NAMES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
 
-function iconForBill(name: string): LucideIcon {
+export function iconForBill(name: string): LucideIcon {
   const n = name.toLowerCase()
   if (n.includes('energia') || n.includes('luz')) return Zap
   if (n.includes('água') || n.includes('agua')) return Droplets

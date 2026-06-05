@@ -80,6 +80,7 @@ export function ManageBillsModal({ open, onClose, onRefresh }: Props) {
               </div>
               <button
                 onClick={() => handleDelete(bill.id)}
+                aria-label={`Excluir ${bill.name}`}
                 className="shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
               >
                 <Trash2 className="size-4" strokeWidth={1.5} />
