@@ -4,6 +4,10 @@ import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
 
 export default defineConfig({
+  esbuild: {
+    jsx: 'automatic',
+    jsxImportSource: 'react',
+  },
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
