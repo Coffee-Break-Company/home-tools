@@ -25,23 +25,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return
     }
 
-    const res = await fetch(`${API_BASE}/api/auth/verify`, {
-      headers: { Authorization: `Bearer ${session.access_token}` },
-    })
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/verify`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      })
 
-    if (res.status === 403) {
-      await supabase.auth.signOut()
-      setAuth({ status: 'unauthorized', email: session.user.email ?? '' })
-      return
-    }
+      if (res.status === 403) {
+        await supabase.auth.signOut()
+        setAuth({ status: 'unauthorized', email: session.user.email ?? '' })
+        return
+      }
 
-    if (!res.ok) {
-      await supabase.auth.signOut()
+      if (!res.ok) {
+        await supabase.auth.signOut()
+        setAuth({ status: 'unauthenticated' })
+        return
+      }
+
+      setAuth({ status: 'authenticated', user: session.user, session })
+    } catch {
       setAuth({ status: 'unauthenticated' })
-      return
     }
-
-    setAuth({ status: 'authenticated', user: session.user, session })
   }, [])
 
   useEffect(() => {
