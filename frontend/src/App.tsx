@@ -4,7 +4,6 @@ import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { Login } from '@/pages/Login'
 import { Home } from '@/pages/Home'
 import { Bills } from '@/pages/Bills'
-import { NotFound } from '@/pages/NotFound'
 
 function App() {
   return (
