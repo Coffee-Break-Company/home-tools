@@ -4,8 +4,9 @@ import base64
 import unicodedata
 from uuid import uuid4
 from datetime import datetime
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -39,6 +40,26 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+security = HTTPBearer()
+
+
+async def verify_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    try:
+        response = supabase.auth.get_user(token)
+        user = response.user
+        if user is None:
+            raise HTTPException(status_code=401, detail="Token inválido")
+        email = user.email or ""
+        allowed = supabase.table("allowed_emails").select("email").eq("email", email).execute()
+        if not allowed.data:
+            raise HTTPException(status_code=403, detail="Email não autorizado")
+        return user
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=401, detail="Token inválido ou expirado")
 
 
 # --- Google Drive ---
@@ -89,14 +110,19 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/api/auth/verify")
+def auth_verify(user=Depends(verify_user)):
+    return {"email": user.email}
+
+
 @app.get("/api/bills")
-def get_bills():
+def get_bills(_user=Depends(verify_user)):
     res = supabase.table("bills").select("*").execute()
     return res.data
 
 
 @app.post("/api/bills", status_code=201)
-def create_bill(bill: BillCreate):
+def create_bill(bill: BillCreate, _user=Depends(verify_user)):
     res = supabase.table("bills").insert({
         "id": str(uuid4()),
         **bill.model_dump(),
@@ -105,7 +131,7 @@ def create_bill(bill: BillCreate):
 
 
 @app.delete("/api/bills/{bill_id}")
-def delete_bill(bill_id: str):
+def delete_bill(bill_id: str, _user=Depends(verify_user)):
     res = supabase.table("bills").delete().eq("id", bill_id).execute()
     if not res.data:
         raise HTTPException(status_code=404, detail="Not found")
@@ -113,7 +139,7 @@ def delete_bill(bill_id: str):
 
 
 @app.get("/api/bills/status")
-def get_bills_status():
+def get_bills_status(_user=Depends(verify_user)):
     bills = supabase.table("bills").select("*").execute().data
     month = datetime.now().month
     return [
