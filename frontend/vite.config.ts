@@ -8,23 +8,6 @@ export default defineConfig({
     jsx: 'automatic',
     jsxImportSource: 'react',
   },
-  test: {
-    globals: true,
-    environment: 'jsdom',
-    setupFiles: ['./src/__tests__/setup.ts'],
-    coverage: {
-      provider: 'v8',
-      reporter: ['text', 'lcov'],
-      include: ['src/**/*.{ts,tsx}'],
-      exclude: [
-        'src/main.tsx',
-        'src/vite-env.d.ts',
-        'src/lib/supabase.ts',
-        'src/components/ui/**',
-        'src/__tests__/**',
-      ],
-    },
-  },
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
