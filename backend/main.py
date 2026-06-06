@@ -1,10 +1,13 @@
 import os
 import json
 import base64
+import calendar
 import unicodedata
 from uuid import uuid4
 from datetime import datetime
-from fastapi import FastAPI, HTTPException, Depends
+from zoneinfo import ZoneInfo
+import httpx
+from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from google.oauth2 import service_account
@@ -19,6 +22,8 @@ load_dotenv()
 CREDENTIALS_PATH = os.getenv("GOOGLE_CREDENTIALS_PATH")
 SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 
+TIMEZONE = ZoneInfo("America/Sao_Paulo")
+
 supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 
 MONTHS_PT = [
@@ -29,6 +34,18 @@ MONTHS_PT = [
 
 def normalize(s: str) -> str:
     return unicodedata.normalize("NFD", s).encode("ascii", "ignore").decode().lower()
+
+
+def days_until_due(due_day: int, today: datetime) -> int:
+    """Days until the bill's due day within the current month.
+
+    Negative means the due day already passed this month (overdue).
+    A due_day beyond the month's length is clamped to the last day
+    (e.g. 31 in February becomes 28/29).
+    """
+    last_day = calendar.monthrange(today.year, today.month)[1]
+    effective_due = min(due_day, last_day)
+    return effective_due - today.day
 
 
 app = FastAPI(title="Home Tools API", version="0.1.0")
@@ -94,6 +111,20 @@ def check_payment_exists(drive_folder_id: str, month: int) -> bool:
         return False
 
 
+# --- Telegram ---
+
+def send_telegram_message(text: str) -> None:
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    if not token or not chat_id:
+        raise HTTPException(status_code=500, detail="Telegram não configurado")
+    httpx.post(
+        f"https://api.telegram.org/bot{token}/sendMessage",
+        json={"chat_id": chat_id, "text": text},
+        timeout=10,
+    ).raise_for_status()
+
+
 # --- Models ---
 
 class BillCreate(BaseModel):
@@ -146,3 +177,39 @@ def get_bills_status(_user=Depends(verify_user)):
         {**bill, "paid": check_payment_exists(bill["drive_folder_id"], month)}
         for bill in bills
     ]
+
+
+def _reminder_line(name: str, days: int) -> str:
+    if days < 0:
+        n = abs(days)
+        return f"🔴 {name} — atrasada há {n} {'dia' if n == 1 else 'dias'}"
+    if days == 0:
+        return f"⚠️ {name} — vence hoje"
+    return f"🟡 {name} — vence em {days} {'dia' if days == 1 else 'dias'}"
+
+
+@app.post("/api/cron/scan")
+def scan_due_bills(x_cron_secret: str | None = Header(default=None)):
+    expected = os.getenv("CRON_SECRET")
+    if not expected or x_cron_secret != expected:
+        raise HTTPException(status_code=401, detail="Não autorizado")
+
+    days_ahead = int(os.getenv("REMINDER_DAYS_AHEAD", "3"))
+    today = datetime.now(TIMEZONE)
+    bills = supabase.table("bills").select("*").execute().data
+
+    notified = []
+    for bill in bills:
+        days = days_until_due(bill["due_day"], today)
+        if days > days_ahead:
+            continue
+        if check_payment_exists(bill["drive_folder_id"], today.month):
+            continue
+        notified.append({"name": bill["name"], "days_until_due": days})
+
+    if notified:
+        notified.sort(key=lambda b: b["days_until_due"])
+        lines = [_reminder_line(b["name"], b["days_until_due"]) for b in notified]
+        send_telegram_message("Contas pendentes:\n" + "\n".join(lines))
+
+    return {"checked": len(bills), "notified": notified}

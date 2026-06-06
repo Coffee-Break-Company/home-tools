@@ -1,0 +1,20 @@
+name: Bill Reminder
+
+on:
+  schedule:
+    # 11:00 UTC ≈ 08:00 BRT, daily
+    - cron: "0 11 * * *"
+  workflow_dispatch:
+
+jobs:
+  scan:
+    name: Scan due bills
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger daily scan
+        run: |
+          curl --fail --show-error --silent \
+            --retry 3 --retry-all-errors --max-time 120 \
+            -X POST "${{ secrets.API_URL }}/api/cron/scan" \
+            -H "X-Cron-Secret: ${{ secrets.CRON_SECRET }}"
