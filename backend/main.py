@@ -1,3 +1,4 @@
+import io
 import os
 import html
 import json
@@ -8,12 +9,13 @@ from uuid import uuid4
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import httpx
-from fastapi import FastAPI, HTTPException, Depends, Header
+from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from googleapiclient.http import MediaIoBaseUpload
 from supabase import create_client
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -21,7 +23,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 CREDENTIALS_PATH = os.getenv("GOOGLE_CREDENTIALS_PATH")
-SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
+SCOPES = ["https://www.googleapis.com/auth/drive"]
 
 TIMEZONE = ZoneInfo("America/Sao_Paulo")
 
@@ -168,6 +170,61 @@ def delete_bill(bill_id: str, _user=Depends(verify_user)):
     if not res.data:
         raise HTTPException(status_code=404, detail="Not found")
     return {"ok": True}
+
+
+RECEIPT_MAX_BYTES = 10 * 1024 * 1024
+RECEIPT_TYPES = {
+    "application/pdf": ".pdf",
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+}
+
+
+def receipt_file_name(month: int, today: datetime, extension: str) -> str:
+    """Name the receipt as check_payment_exists expects ("Junho 2026.pdf").
+
+    A month ahead of the current one is assumed to belong to the previous
+    year (e.g. uploading December's receipt in January).
+    """
+    year = today.year - 1 if month > today.month else today.year
+    return f"{MONTHS_PT[month - 1].capitalize()} {year}{extension}"
+
+
+@app.post("/api/bills/{bill_id}/receipt", status_code=201)
+async def upload_receipt(
+    bill_id: str,
+    month: int = Form(...),
+    file: UploadFile = File(...),
+    _user=Depends(verify_user),
+):
+    if not 1 <= month <= 12:
+        raise HTTPException(status_code=400, detail="Mês inválido")
+    extension = RECEIPT_TYPES.get(file.content_type or "")
+    if extension is None:
+        raise HTTPException(status_code=400, detail="Envie um PDF ou uma imagem (JPG, PNG, WebP)")
+    content = await file.read()
+    if len(content) > RECEIPT_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Arquivo maior que 10 MB")
+
+    res = supabase.table("bills").select("*").eq("id", bill_id).execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Conta não encontrada")
+    bill = res.data[0]
+
+    name = receipt_file_name(month, datetime.now(TIMEZONE), extension)
+    media = MediaIoBaseUpload(io.BytesIO(content), mimetype=file.content_type)
+    try:
+        created = get_drive_service().files().create(
+            body={"name": name, "parents": [bill["drive_folder_id"]]},
+            media_body=media,
+            fields="id, name",
+            supportsAllDrives=True,
+        ).execute()
+    except HttpError:
+        raise HTTPException(status_code=502, detail="Falha ao enviar o arquivo para o Drive")
+
+    return {"ok": True, "file_id": created.get("id"), "file_name": created.get("name")}
 
 
 @app.get("/api/bills/status")

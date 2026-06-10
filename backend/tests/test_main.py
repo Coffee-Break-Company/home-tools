@@ -12,6 +12,7 @@ from main import (
     normalize,
     days_until_due,
     send_telegram_message,
+    receipt_file_name,
     _urgency_dot,
     _due_phrase,
     _build_reminder_message,
@@ -421,6 +422,89 @@ def test_send_telegram_message_not_configured(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         send_telegram_message("hello")
     assert exc.value.status_code == 500
+
+
+# ── POST /api/bills/{id}/receipt ──────────────────────────────────────────────
+
+def _upload_receipt(client, bill_id="1", month=6, filename="comprovante.pdf",
+                    content=b"%PDF-fake", ctype="application/pdf"):
+    return client.post(
+        f"/api/bills/{bill_id}/receipt",
+        data={"month": str(month)},
+        files={"file": (filename, content, ctype)},
+    )
+
+
+def test_receipt_file_name_current_year():
+    assert receipt_file_name(6, datetime(2026, 6, 9), ".pdf") == "Junho 2026.pdf"
+
+
+def test_receipt_file_name_future_month_uses_previous_year():
+    assert receipt_file_name(12, datetime(2026, 1, 5), ".pdf") == "Dezembro 2025.pdf"
+
+
+def test_upload_receipt_success(auth_client, fresh_supabase):
+    fresh_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value.data = [
+        {"id": "1", "name": "Água", "due_day": 10, "drive_folder_id": "folder-1"}
+    ]
+    svc = MagicMock()
+    svc.files.return_value.create.return_value.execute.return_value = {"id": "drive-id", "name": "Junho 2026.pdf"}
+
+    with patch("main.get_drive_service", return_value=svc):
+        res = _upload_receipt(auth_client)
+
+    assert res.status_code == 201
+    body = res.json()
+    assert body["ok"] is True
+    assert body["file_id"] == "drive-id"
+
+    create_kwargs = svc.files.return_value.create.call_args.kwargs
+    assert create_kwargs["body"]["parents"] == ["folder-1"]
+    assert create_kwargs["body"]["name"].endswith(".pdf")
+
+
+def test_upload_receipt_invalid_month(auth_client):
+    res = _upload_receipt(auth_client, month=13)
+    assert res.status_code == 400
+
+
+def test_upload_receipt_unsupported_type(auth_client):
+    res = _upload_receipt(auth_client, filename="notas.txt", ctype="text/plain")
+    assert res.status_code == 400
+
+
+def test_upload_receipt_too_large(auth_client):
+    res = _upload_receipt(auth_client, content=b"x" * (10 * 1024 * 1024 + 1))
+    assert res.status_code == 413
+
+
+def test_upload_receipt_bill_not_found(auth_client, fresh_supabase):
+    fresh_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value.data = []
+    res = _upload_receipt(auth_client, bill_id="missing")
+    assert res.status_code == 404
+
+
+def test_upload_receipt_drive_error_returns_502(auth_client, fresh_supabase):
+    from googleapiclient.errors import HttpError
+
+    fresh_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value.data = [
+        {"id": "1", "name": "Água", "due_day": 10, "drive_folder_id": "folder-1"}
+    ]
+    svc = MagicMock()
+    resp = MagicMock()
+    resp.status = 403
+    svc.files.return_value.create.return_value.execute.side_effect = HttpError(resp, b"Forbidden")
+
+    with patch("main.get_drive_service", return_value=svc):
+        res = _upload_receipt(auth_client)
+
+    assert res.status_code == 502
+
+
+def test_upload_receipt_requires_auth():
+    with TestClient(app) as c:
+        res = _upload_receipt(c)
+    assert res.status_code == 401
 
 
 # ── POST /api/cron/scan ───────────────────────────────────────────────────────
