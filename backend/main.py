@@ -1,4 +1,5 @@
 import os
+import html
 import json
 import base64
 import calendar
@@ -120,7 +121,7 @@ def send_telegram_message(text: str) -> None:
         raise HTTPException(status_code=500, detail="Telegram não configurado")
     httpx.post(
         f"https://api.telegram.org/bot{token}/sendMessage",
-        json={"chat_id": chat_id, "text": text},
+        json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"},
         timeout=10,
     ).raise_for_status()
 
@@ -179,13 +180,52 @@ def get_bills_status(_user=Depends(verify_user)):
     ]
 
 
-def _reminder_line(name: str, days: int) -> str:
+def _urgency_dot(days: int) -> str:
+    if days < 0:
+        return "🔴"
+    if days == 0:
+        return "🟠"
+    if days <= 2:
+        return "🟡"
+    return "⚪"
+
+
+def _due_phrase(days: int, plural: bool = False) -> str:
     if days < 0:
         n = abs(days)
-        return f"🔴 {name} — atrasada há {n} {'dia' if n == 1 else 'dias'}"
+        verb = "venceram" if plural else "venceu"
+        return f"{verb} há {n} {'dia' if n == 1 else 'dias'}"
+    verb = "vencem" if plural else "vence"
     if days == 0:
-        return f"⚠️ {name} — vence hoje"
-    return f"🟡 {name} — vence em {days} {'dia' if days == 1 else 'dias'}"
+        return f"{verb} hoje"
+    if days == 1:
+        return f"{verb} amanhã"
+    return f"{verb} em {days} dias"
+
+
+def _build_reminder_message(notified: list[dict]) -> str:
+    """Telegram HTML message: headline + monospace table sorted by urgency.
+
+    Expects `notified` already sorted by days_until_due ascending.
+    The headline groups every bill tied at the highest urgency.
+    """
+    top_days = notified[0]["days_until_due"]
+    top = [b for b in notified if b["days_until_due"] == top_days]
+    names = [f"<b>{html.escape(b['name'])}</b>" for b in top]
+    subject = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " e " + names[-1]
+    prefix = "Suas contas" if len(top) > 1 else "Sua conta"
+    headline = f"{prefix} {subject} {_due_phrase(top_days, plural=len(top) > 1)}"
+    others = len(notified) - len(top)
+    if others:
+        headline += f" — e mais {others} {'conta' if others == 1 else 'contas'} na fila"
+
+    width = max(len(b["name"]) for b in notified)
+    rows = "\n".join(
+        f"{_urgency_dot(b['days_until_due'])} "
+        + html.escape(f"{b['name'].ljust(width)}  {_due_phrase(b['days_until_due'])}")
+        for b in notified
+    )
+    return f"{headline}\n\n<pre>{rows}</pre>"
 
 
 @app.post("/api/cron/scan")
@@ -209,7 +249,6 @@ def scan_due_bills(x_cron_secret: str | None = Header(default=None)):
 
     if notified:
         notified.sort(key=lambda b: b["days_until_due"])
-        lines = [_reminder_line(b["name"], b["days_until_due"]) for b in notified]
-        send_telegram_message("Contas pendentes:\n" + "\n".join(lines))
+        send_telegram_message(_build_reminder_message(notified))
 
     return {"checked": len(bills), "notified": notified}
