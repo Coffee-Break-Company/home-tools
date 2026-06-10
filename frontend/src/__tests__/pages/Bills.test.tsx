@@ -13,6 +13,12 @@ vi.mock('@/components/ManageBillsModal', () => ({
     open ? <div data-testid="manage-modal">Modal</div> : null,
 }))
 
+vi.mock('@/components/UploadReceiptModal', () => ({
+  UploadReceiptModal: ({ bill }: { bill: { name: string } }) => (
+    <div data-testid="upload-modal">{bill.name}</div>
+  ),
+}))
+
 import { Bills, iconForBill } from '@/pages/Bills'
 import { api } from '@/lib/api'
 
@@ -87,6 +93,25 @@ describe('Bills page', () => {
     await waitFor(() =>
       expect(screen.getByText('Nenhuma conta cadastrada.')).toBeInTheDocument(),
     )
+  })
+
+  it('shows the upload button only on pending bills', async () => {
+    vi.mocked(api.get).mockResolvedValue(makeJsonResponse(mockBills))
+    renderBills()
+    await waitFor(() => expect(screen.getByText('Água')).toBeInTheDocument())
+
+    expect(screen.getByRole('button', { name: 'Enviar comprovante de Água' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Energia Elétrica/ })).not.toBeInTheDocument()
+  })
+
+  it('opens the upload modal for the clicked bill', async () => {
+    vi.mocked(api.get).mockResolvedValue(makeJsonResponse(mockBills))
+    renderBills()
+    await waitFor(() => expect(screen.getByText('Água')).toBeInTheDocument())
+
+    await userEvent.click(screen.getByRole('button', { name: 'Enviar comprovante de Água' }))
+
+    expect(screen.getByTestId('upload-modal')).toHaveTextContent('Água')
   })
 
   it('opens the manage modal when "Gerenciar" is clicked', async () => {

@@ -2,11 +2,12 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import {
   ChevronLeft, Settings2, Zap, Droplets, Wifi, Building2,
-  Flame, ShoppingCart, Receipt, CheckCircle2, Circle,
+  Flame, ShoppingCart, Receipt, CheckCircle2, Circle, Upload,
   type LucideIcon,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { ManageBillsModal } from '@/components/ManageBillsModal'
+import { UploadReceiptModal } from '@/components/UploadReceiptModal'
 import { api } from '@/lib/api'
 
 type Bill = {
@@ -34,6 +35,7 @@ export function Bills() {
   const [bills, setBills] = useState<Bill[]>([])
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
+  const [uploadBill, setUploadBill] = useState<Bill | null>(null)
 
   const currentMonth = new Date().getMonth()
 
@@ -127,10 +129,19 @@ export function Bills() {
                       Pago
                     </Badge>
                   ) : (
-                    <Badge variant="secondary" className="flex items-center gap-1 text-xs font-normal text-muted-foreground">
-                      <Circle className="size-3.5" strokeWidth={1.5} />
-                      Pendente
-                    </Badge>
+                    <>
+                      <Badge variant="secondary" className="flex items-center gap-1 text-xs font-normal text-muted-foreground">
+                        <Circle className="size-3.5" strokeWidth={1.5} />
+                        Pendente
+                      </Badge>
+                      <button
+                        onClick={() => setUploadBill(bill)}
+                        aria-label={`Enviar comprovante de ${bill.name}`}
+                        className="shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                      >
+                        <Upload className="size-4" strokeWidth={1.5} />
+                      </button>
+                    </>
                   )}
                 </div>
               )
@@ -145,6 +156,17 @@ export function Bills() {
         onClose={() => setModalOpen(false)}
         onRefresh={fetchStatus}
       />
+
+      {uploadBill && (
+        <UploadReceiptModal
+          bill={uploadBill}
+          onClose={() => setUploadBill(null)}
+          onSuccess={() => {
+            setUploadBill(null)
+            fetchStatus()
+          }}
+        />
+      )}
     </div>
   )
 }
