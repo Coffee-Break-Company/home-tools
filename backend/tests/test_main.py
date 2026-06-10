@@ -12,7 +12,9 @@ from main import (
     normalize,
     days_until_due,
     send_telegram_message,
-    _reminder_line,
+    _urgency_dot,
+    _due_phrase,
+    _build_reminder_message,
     get_drive_service,
     check_payment_exists,
     verify_user,
@@ -307,26 +309,94 @@ def test_days_until_due_clamps_to_end_of_month():
     assert days_until_due(31, datetime(2024, 2, 15)) == 14
 
 
-# ── _reminder_line ────────────────────────────────────────────────────────────
+# ── _urgency_dot / _due_phrase ────────────────────────────────────────────────
 
-def test_reminder_line_overdue_singular():
-    assert _reminder_line("Água", -1) == "🔴 Água — atrasada há 1 dia"
-
-
-def test_reminder_line_overdue_plural():
-    assert _reminder_line("Água", -3) == "🔴 Água — atrasada há 3 dias"
-
-
-def test_reminder_line_due_today():
-    assert _reminder_line("Energia", 0) == "⚠️ Energia — vence hoje"
+def test_urgency_dot_tiers():
+    assert _urgency_dot(-1) == "🔴"
+    assert _urgency_dot(0) == "🟠"
+    assert _urgency_dot(1) == "🟡"
+    assert _urgency_dot(2) == "🟡"
+    assert _urgency_dot(3) == "⚪"
 
 
-def test_reminder_line_upcoming_singular():
-    assert _reminder_line("Internet", 1) == "🟡 Internet — vence em 1 dia"
+def test_due_phrase_overdue_singular():
+    assert _due_phrase(-1) == "venceu há 1 dia"
 
 
-def test_reminder_line_upcoming_plural():
-    assert _reminder_line("Internet", 2) == "🟡 Internet — vence em 2 dias"
+def test_due_phrase_overdue_plural():
+    assert _due_phrase(-3) == "venceu há 3 dias"
+
+
+def test_due_phrase_today():
+    assert _due_phrase(0) == "vence hoje"
+
+
+def test_due_phrase_tomorrow():
+    assert _due_phrase(1) == "vence amanhã"
+
+
+def test_due_phrase_upcoming():
+    assert _due_phrase(5) == "vence em 5 dias"
+
+
+def test_due_phrase_plural():
+    assert _due_phrase(-2, plural=True) == "venceram há 2 dias"
+    assert _due_phrase(0, plural=True) == "vencem hoje"
+    assert _due_phrase(1, plural=True) == "vencem amanhã"
+    assert _due_phrase(5, plural=True) == "vencem em 5 dias"
+
+
+# ── _build_reminder_message ───────────────────────────────────────────────────
+
+def test_build_reminder_message_single_bill():
+    msg = _build_reminder_message([{"name": "Água", "days_until_due": 1}])
+    assert msg == "Sua conta <b>Água</b> vence amanhã\n\n<pre>🟡 Água  vence amanhã</pre>"
+
+
+def test_build_reminder_message_multiple_bills_aligned():
+    msg = _build_reminder_message([
+        {"name": "Luz", "days_until_due": -2},
+        {"name": "Internet", "days_until_due": 5},
+    ])
+    assert msg.startswith("Sua conta <b>Luz</b> venceu há 2 dias — e mais 1 conta na fila")
+    assert "🔴 Luz       venceu há 2 dias" in msg
+    assert "⚪ Internet  vence em 5 dias" in msg
+
+
+def test_build_reminder_message_plural_queue():
+    msg = _build_reminder_message([
+        {"name": "Luz", "days_until_due": 0},
+        {"name": "Água", "days_until_due": 1},
+        {"name": "Internet", "days_until_due": 2},
+    ])
+    assert "— e mais 2 contas na fila" in msg
+
+
+def test_build_reminder_message_groups_tied_urgency():
+    msg = _build_reminder_message([
+        {"name": "Água", "days_until_due": 1},
+        {"name": "Luz", "days_until_due": 1},
+    ])
+    assert msg.startswith("Suas contas <b>Água</b> e <b>Luz</b> vencem amanhã")
+    assert "na fila" not in msg
+
+
+def test_build_reminder_message_groups_ties_and_counts_rest():
+    msg = _build_reminder_message([
+        {"name": "Água", "days_until_due": 0},
+        {"name": "Luz", "days_until_due": 0},
+        {"name": "Gás", "days_until_due": 0},
+        {"name": "Internet", "days_until_due": 2},
+    ])
+    assert msg.startswith(
+        "Suas contas <b>Água</b>, <b>Luz</b> e <b>Gás</b> vencem hoje — e mais 1 conta na fila"
+    )
+
+
+def test_build_reminder_message_escapes_html():
+    msg = _build_reminder_message([{"name": "A&B <Casa>", "days_until_due": 0}])
+    assert "<b>A&amp;B &lt;Casa&gt;</b>" in msg
+    assert "A&B <Casa>" not in msg
 
 
 # ── send_telegram_message ─────────────────────────────────────────────────────
@@ -340,7 +410,7 @@ def test_send_telegram_message_success(monkeypatch):
 
     p_post.assert_called_once()
     kwargs = p_post.call_args.kwargs
-    assert kwargs["json"] == {"chat_id": "chat456", "text": "hello"}
+    assert kwargs["json"] == {"chat_id": "chat456", "text": "hello", "parse_mode": "HTML"}
     assert "token123" in p_post.call_args.args[0]
 
 
