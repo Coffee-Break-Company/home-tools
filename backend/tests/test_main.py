@@ -10,6 +10,9 @@ import main
 from main import (
     app,
     normalize,
+    days_until_due,
+    send_telegram_message,
+    _reminder_line,
     get_drive_service,
     check_payment_exists,
     verify_user,
@@ -284,3 +287,146 @@ def test_get_bills_status_no_token():
     with TestClient(app) as c:
         res = c.get("/api/bills/status")
     assert res.status_code == 401
+
+
+# ── days_until_due ────────────────────────────────────────────────────────────
+
+from datetime import datetime  # noqa: E402
+
+
+def test_days_until_due_upcoming():
+    assert days_until_due(20, datetime(2024, 6, 15)) == 5
+
+
+def test_days_until_due_overdue():
+    assert days_until_due(10, datetime(2024, 6, 15)) == -5
+
+
+def test_days_until_due_clamps_to_end_of_month():
+    # February 2024 has 29 days; due_day 31 -> effective 29.
+    assert days_until_due(31, datetime(2024, 2, 15)) == 14
+
+
+# ── _reminder_line ────────────────────────────────────────────────────────────
+
+def test_reminder_line_overdue_singular():
+    assert _reminder_line("Água", -1) == "🔴 Água — atrasada há 1 dia"
+
+
+def test_reminder_line_overdue_plural():
+    assert _reminder_line("Água", -3) == "🔴 Água — atrasada há 3 dias"
+
+
+def test_reminder_line_due_today():
+    assert _reminder_line("Energia", 0) == "⚠️ Energia — vence hoje"
+
+
+def test_reminder_line_upcoming_singular():
+    assert _reminder_line("Internet", 1) == "🟡 Internet — vence em 1 dia"
+
+
+def test_reminder_line_upcoming_plural():
+    assert _reminder_line("Internet", 2) == "🟡 Internet — vence em 2 dias"
+
+
+# ── send_telegram_message ─────────────────────────────────────────────────────
+
+def test_send_telegram_message_success(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token123")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "chat456")
+
+    with patch("main.httpx.post") as p_post:
+        send_telegram_message("hello")
+
+    p_post.assert_called_once()
+    kwargs = p_post.call_args.kwargs
+    assert kwargs["json"] == {"chat_id": "chat456", "text": "hello"}
+    assert "token123" in p_post.call_args.args[0]
+
+
+def test_send_telegram_message_not_configured(monkeypatch):
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+
+    with pytest.raises(HTTPException) as exc:
+        send_telegram_message("hello")
+    assert exc.value.status_code == 500
+
+
+# ── POST /api/cron/scan ───────────────────────────────────────────────────────
+
+def test_scan_no_secret_configured_returns_401(monkeypatch):
+    monkeypatch.delenv("CRON_SECRET", raising=False)
+    with TestClient(app) as c:
+        res = c.post("/api/cron/scan", headers={"X-Cron-Secret": "anything"})
+    assert res.status_code == 401
+
+
+def test_scan_wrong_secret_returns_401(monkeypatch):
+    monkeypatch.setenv("CRON_SECRET", "correct")
+    with TestClient(app) as c:
+        res = c.post("/api/cron/scan", headers={"X-Cron-Secret": "wrong"})
+    assert res.status_code == 401
+
+
+def test_scan_notifies_unpaid_due_soon(monkeypatch, fresh_supabase):
+    monkeypatch.setenv("CRON_SECRET", "secret")
+    now = datetime(2024, 6, 15, tzinfo=main.TIMEZONE)
+    bills = [{"id": "1", "name": "Energia", "due_day": 16, "drive_folder_id": "f1"}]
+    fresh_supabase.table.return_value.select.return_value.execute.return_value.data = bills
+
+    with (
+        patch("main.datetime") as p_dt,
+        patch("main.check_payment_exists", return_value=False),
+        patch("main.send_telegram_message") as p_send,
+    ):
+        p_dt.now.return_value = now
+        with TestClient(app) as c:
+            res = c.post("/api/cron/scan", headers={"X-Cron-Secret": "secret"})
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["checked"] == 1
+    assert body["notified"] == [{"name": "Energia", "days_until_due": 1}]
+    p_send.assert_called_once()
+
+
+def test_scan_skips_paid_bill(monkeypatch, fresh_supabase):
+    monkeypatch.setenv("CRON_SECRET", "secret")
+    now = datetime(2024, 6, 15, tzinfo=main.TIMEZONE)
+    bills = [{"id": "1", "name": "Energia", "due_day": 16, "drive_folder_id": "f1"}]
+    fresh_supabase.table.return_value.select.return_value.execute.return_value.data = bills
+
+    with (
+        patch("main.datetime") as p_dt,
+        patch("main.check_payment_exists", return_value=True),
+        patch("main.send_telegram_message") as p_send,
+    ):
+        p_dt.now.return_value = now
+        with TestClient(app) as c:
+            res = c.post("/api/cron/scan", headers={"X-Cron-Secret": "secret"})
+
+    assert res.status_code == 200
+    assert res.json()["notified"] == []
+    p_send.assert_not_called()
+
+
+def test_scan_skips_bill_far_from_due(monkeypatch, fresh_supabase):
+    monkeypatch.setenv("CRON_SECRET", "secret")
+    now = datetime(2024, 6, 1, tzinfo=main.TIMEZONE)
+    bills = [{"id": "1", "name": "Energia", "due_day": 28, "drive_folder_id": "f1"}]
+    fresh_supabase.table.return_value.select.return_value.execute.return_value.data = bills
+
+    with (
+        patch("main.datetime") as p_dt,
+        patch("main.check_payment_exists", return_value=False) as p_check,
+        patch("main.send_telegram_message") as p_send,
+    ):
+        p_dt.now.return_value = now
+        with TestClient(app) as c:
+            res = c.post("/api/cron/scan", headers={"X-Cron-Secret": "secret"})
+
+    assert res.status_code == 200
+    assert res.json()["notified"] == []
+    p_check.assert_not_called()
+    p_send.assert_not_called()
