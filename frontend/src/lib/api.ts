@@ -20,6 +20,12 @@ export const api = {
       headers: await authHeaders(),
       body: JSON.stringify(body),
     }),
+  // No Content-Type header: the browser sets multipart/form-data with the boundary.
+  postForm: async (path: string, body: FormData) => {
+    const headers = await authHeaders()
+    delete headers['Content-Type']
+    return fetch(`${base}${path}`, { method: 'POST', headers, body })
+  },
   delete: async (path: string) =>
     fetch(`${base}${path}`, { method: 'DELETE', headers: await authHeaders() }),
 }
