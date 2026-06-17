@@ -2,8 +2,8 @@ name: Bill Reminder
 
 on:
   schedule:
-    # 11:00 UTC ≈ 08:00 BRT, daily
-    - cron: "0 11 * * *"
+    # 10:37 UTC ≈ 07:37 BRT, daily — off the top of the hour to dodge scheduler load
+    - cron: "37 10 * * *"
   workflow_dispatch:
 
 jobs:
