@@ -73,6 +73,9 @@ export function Bills() {
 
   const paid = bills.filter((b) => b.paid).length
 
+  // Paid bills first, keeping each group's original order.
+  const sortedBills = [...bills].sort((a, b) => Number(b.paid) - Number(a.paid))
+
   // Group earlier-month gaps by bill so each appears once ("Água · Abril, Maio").
   const missingByBill = missing.reduce<{ name: string; months: string[] }[]>((acc, m) => {
     const entry = acc.find((e) => e.name === m.name)
@@ -136,7 +139,7 @@ export function Bills() {
         {/* Bill list */}
         {!loading && bills.length > 0 && (
           <div className="flex flex-col gap-2">
-            {bills.map((bill) => {
+            {sortedBills.map((bill) => {
               const Icon = iconForBill(bill.name)
               return (
                 <div
