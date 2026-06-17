@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import {
   ChevronLeft, Settings2, Zap, Droplets, Wifi, Building2,
-  Flame, ShoppingCart, Receipt, CheckCircle2, Circle, Upload,
+  Flame, ShoppingCart, Receipt, CheckCircle2, Circle, Upload, AlertTriangle,
   type LucideIcon,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -18,7 +18,18 @@ type Bill = {
   paid: boolean
 }
 
+type MissingPayment = {
+  name: string
+  month: number
+  month_name: string
+}
+
 const MONTH_NAMES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
+
+const MONTH_NAMES_FULL = [
+  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
+]
 
 export function iconForBill(name: string): LucideIcon {
   const n = name.toLowerCase()
@@ -33,11 +44,13 @@ export function iconForBill(name: string): LucideIcon {
 
 export function Bills() {
   const [bills, setBills] = useState<Bill[]>([])
+  const [missing, setMissing] = useState<MissingPayment[]>([])
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [uploadBill, setUploadBill] = useState<Bill | null>(null)
 
-  const currentMonth = new Date().getMonth()
+  const now = new Date()
+  const currentMonth = now.getMonth()
 
   async function fetchStatus() {
     setLoading(true)
@@ -49,9 +62,33 @@ export function Bills() {
     }
   }
 
-  useEffect(() => { fetchStatus() }, [])
+  async function fetchMissing() {
+    const res = await api.get('/api/bills/missing')
+    if (res.ok) setMissing(await res.json())
+  }
+
+  function refresh() {
+    fetchStatus()
+    fetchMissing()
+  }
+
+  useEffect(() => {
+    fetchStatus()
+    fetchMissing()
+  }, [])
 
   const paid = bills.filter((b) => b.paid).length
+
+  // Paid bills first, keeping each group's original order.
+  const sortedBills = [...bills].sort((a, b) => Number(b.paid) - Number(a.paid))
+
+  // Group earlier-month gaps by bill so each appears once ("Água · Abril, Maio").
+  const missingByBill = missing.reduce<{ name: string; months: string[] }[]>((acc, m) => {
+    const entry = acc.find((e) => e.name === m.name)
+    if (entry) entry.months.push(m.month_name)
+    else acc.push({ name: m.name, months: [m.month_name] })
+    return acc
+  }, [])
 
   return (
     <div className="min-h-screen bg-background">
@@ -83,6 +120,17 @@ export function Bills() {
           </button>
         </div>
 
+        {/* Current month */}
+        <div className="mb-8">
+          <p className="text-[0.7rem] font-medium uppercase tracking-[0.18em] text-muted-foreground">
+            Mês atual
+          </p>
+          <h2 className="mt-1 text-3xl font-light tracking-tight text-foreground">
+            {MONTH_NAMES_FULL[currentMonth]}
+            <span className="ml-2 text-muted-foreground/60">{now.getFullYear()}</span>
+          </h2>
+        </div>
+
         {/* Loading */}
         {loading && (
           <div className="flex flex-col gap-2">
@@ -108,7 +156,7 @@ export function Bills() {
         {/* Bill list */}
         {!loading && bills.length > 0 && (
           <div className="flex flex-col gap-2">
-            {bills.map((bill) => {
+            {sortedBills.map((bill) => {
               const Icon = iconForBill(bill.name)
               return (
                 <div
@@ -149,12 +197,36 @@ export function Bills() {
           </div>
         )}
 
+        {/* Overdue from earlier months */}
+        {!loading && missingByBill.length > 0 && (
+          <div className="mt-10 rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3.5">
+            <div className="flex items-center gap-2.5">
+              <AlertTriangle className="size-4 shrink-0 text-amber-400" strokeWidth={1.5} />
+              <span className="text-sm font-medium text-foreground">
+                Contas de meses anteriores em aberto
+              </span>
+            </div>
+            <ul className="mt-3 flex flex-col gap-2">
+              {missingByBill.map(({ name, months }) => {
+                const Icon = iconForBill(name)
+                return (
+                  <li key={name} className="flex items-center gap-2.5 text-xs">
+                    <Icon className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.5} />
+                    <span className="font-medium text-foreground">{name}</span>
+                    <span className="text-muted-foreground">{months.join(', ')}</span>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        )}
+
       </div>
 
       <ManageBillsModal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
-        onRefresh={fetchStatus}
+        onRefresh={refresh}
       />
 
       {uploadBill && (
@@ -163,7 +235,7 @@ export function Bills() {
           onClose={() => setUploadBill(null)}
           onSuccess={() => {
             setUploadBill(null)
-            fetchStatus()
+            refresh()
           }}
         />
       )}

@@ -400,6 +400,31 @@ def test_build_reminder_message_escapes_html():
     assert "A&B <Casa>" not in msg
 
 
+def test_build_reminder_message_all_paid():
+    assert _build_reminder_message([], []) == "Todas as contas estão em dia :)"
+
+
+def test_build_reminder_message_overdue_only():
+    msg = _build_reminder_message([], [
+        {"name": "Água", "month": 4, "month_name": "Abril"},
+        {"name": "Água", "month": 5, "month_name": "Maio"},
+        {"name": "Energia", "month": 3, "month_name": "Marco"},
+    ])
+    assert "vence" not in msg  # no due-soon section
+    assert msg.startswith("⚠️ <b>Contas de meses anteriores em aberto</b>")
+    assert "Água     Abril, Maio" in msg  # months grouped per bill, aligned
+    assert "Energia  Marco" in msg
+
+
+def test_build_reminder_message_due_and_overdue():
+    msg = _build_reminder_message(
+        [{"name": "Internet", "days_until_due": 1}],
+        [{"name": "Água", "month": 4, "month_name": "Abril"}],
+    )
+    assert msg.startswith("Sua conta <b>Internet</b> vence amanhã")
+    assert "⚠️ <b>Contas de meses anteriores em aberto</b>" in msg
+
+
 # ── send_telegram_message ─────────────────────────────────────────────────────
 
 def test_send_telegram_message_success(monkeypatch):
@@ -523,6 +548,12 @@ def test_scan_wrong_secret_returns_401(monkeypatch):
     assert res.status_code == 401
 
 
+# Receipts for every elapsed month up to (and including) `through`, so a bill
+# with these names has nothing due or overdue.
+def _paid_through(through: int) -> set[str]:
+    return {main.MONTHS_PT[m - 1] for m in range(1, through + 1)}
+
+
 def test_scan_notifies_unpaid_due_soon(monkeypatch, fresh_supabase):
     monkeypatch.setenv("CRON_SECRET", "secret")
     now = datetime(2024, 6, 15, tzinfo=main.TIMEZONE)
@@ -531,7 +562,7 @@ def test_scan_notifies_unpaid_due_soon(monkeypatch, fresh_supabase):
 
     with (
         patch("main.datetime") as p_dt,
-        patch("main.check_payment_exists", return_value=False),
+        patch("main.list_bill_folder_names", return_value=[_paid_through(5)]),
         patch("main.send_telegram_message") as p_send,
     ):
         p_dt.now.return_value = now
@@ -542,6 +573,7 @@ def test_scan_notifies_unpaid_due_soon(monkeypatch, fresh_supabase):
     body = res.json()
     assert body["checked"] == 1
     assert body["notified"] == [{"name": "Energia", "days_until_due": 1}]
+    assert body["overdue"] == []
     p_send.assert_called_once()
 
 
@@ -553,7 +585,7 @@ def test_scan_skips_paid_bill(monkeypatch, fresh_supabase):
 
     with (
         patch("main.datetime") as p_dt,
-        patch("main.check_payment_exists", return_value=True),
+        patch("main.list_bill_folder_names", return_value=[_paid_through(6)]),
         patch("main.send_telegram_message") as p_send,
     ):
         p_dt.now.return_value = now
@@ -562,7 +594,8 @@ def test_scan_skips_paid_bill(monkeypatch, fresh_supabase):
 
     assert res.status_code == 200
     assert res.json()["notified"] == []
-    p_send.assert_not_called()
+    assert res.json()["overdue"] == []
+    p_send.assert_called_once_with("Todas as contas estão em dia :)")
 
 
 def test_scan_skips_bill_far_from_due(monkeypatch, fresh_supabase):
@@ -573,7 +606,7 @@ def test_scan_skips_bill_far_from_due(monkeypatch, fresh_supabase):
 
     with (
         patch("main.datetime") as p_dt,
-        patch("main.check_payment_exists", return_value=False) as p_check,
+        patch("main.list_bill_folder_names", return_value=[_paid_through(5)]),
         patch("main.send_telegram_message") as p_send,
     ):
         p_dt.now.return_value = now
@@ -582,5 +615,30 @@ def test_scan_skips_bill_far_from_due(monkeypatch, fresh_supabase):
 
     assert res.status_code == 200
     assert res.json()["notified"] == []
-    p_check.assert_not_called()
-    p_send.assert_not_called()
+    assert res.json()["overdue"] == []
+    p_send.assert_called_once_with("Todas as contas estão em dia :)")
+
+
+def test_scan_notifies_overdue_earlier_months(monkeypatch, fresh_supabase):
+    monkeypatch.setenv("CRON_SECRET", "secret")
+    now = datetime(2024, 6, 15, tzinfo=main.TIMEZONE)
+    # Due day 25: not within the 3-day window, so only earlier months matter.
+    bills = [{"id": "1", "name": "Água", "due_day": 25, "drive_folder_id": "f1"}]
+    fresh_supabase.table.return_value.select.return_value.execute.return_value.data = bills
+
+    with (
+        patch("main.datetime") as p_dt,
+        patch("main.list_bill_folder_names", return_value=[set()]),
+        patch("main.send_telegram_message") as p_send,
+    ):
+        p_dt.now.return_value = now
+        with TestClient(app) as c:
+            res = c.post("/api/cron/scan", headers={"X-Cron-Secret": "secret"})
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["notified"] == []
+    assert [o["month_name"] for o in body["overdue"]] == [
+        "Janeiro", "Fevereiro", "Marco", "Abril", "Maio",
+    ]
+    p_send.assert_called_once()

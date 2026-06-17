@@ -6,6 +6,7 @@ import base64
 import calendar
 import unicodedata
 from uuid import uuid4
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import httpx
@@ -112,6 +113,79 @@ def check_payment_exists(drive_folder_id: str, month: int) -> bool:
 
     except HttpError:
         return False
+
+
+def list_folder_file_names(drive_folder_id: str) -> set[str]:
+    """Normalized names of every file in a folder, in a single listing.
+
+    One call returns receipts for all months/years, so callers can check the
+    whole year locally instead of querying Drive month by month. Builds its own
+    service so it is safe to run from a worker thread (the googleapiclient
+    http transport is not thread-safe). Pages through large folders. Returns an
+    empty set on Drive errors, mirroring check_payment_exists' fail-as-unpaid.
+    """
+    try:
+        service = get_drive_service()
+        names: set[str] = set()
+        page_token = None
+        while True:
+            result = service.files().list(
+                q=f"'{drive_folder_id}' in parents and trashed = false",
+                fields="nextPageToken, files(name)",
+                pageSize=1000,
+                pageToken=page_token,
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
+            ).execute()
+            for file in result.get("files", []):
+                names.add(normalize(file["name"]))
+            page_token = result.get("nextPageToken")
+            if not page_token:
+                return names
+    except HttpError:
+        return set()
+
+
+def has_receipt(file_names: set[str], month: int) -> bool:
+    """True if a receipt for the given month is among the file names.
+
+    Receipts are named by month only ("Junho.pdf"); the year lives in the
+    folder, so each bill folder holds a single year's receipts. Matches the
+    month name as a prefix, accent-insensitively (see normalize).
+    """
+    month_normalized = MONTHS_PT[month - 1]
+    return any(name.startswith(month_normalized) for name in file_names)
+
+
+def list_bill_folder_names(bills: list[dict]) -> list[set[str]]:
+    """File names in each bill's Drive folder, one listing per bill in parallel.
+
+    The returned list is aligned with `bills`, so a single concurrent batch of
+    listings serves both the current-month check and the earlier-months audit.
+    """
+    if not bills:
+        return []
+    with ThreadPoolExecutor(max_workers=min(8, len(bills))) as executor:
+        return list(executor.map(
+            lambda bill: list_folder_file_names(bill["drive_folder_id"]), bills
+        ))
+
+
+def earlier_unpaid_months(bill: dict, file_names: set[str], current_month: int) -> list[dict]:
+    """Elapsed months of the year (before current_month) with no receipt.
+
+    The current month is left out: it may not be due yet and is shown elsewhere.
+    Bills carry no start date, so months before a bill existed count as unpaid.
+    """
+    return [
+        {
+            "name": bill["name"],
+            "month": month,
+            "month_name": MONTHS_PT[month - 1].capitalize(),
+        }
+        for month in range(1, current_month)
+        if not has_receipt(file_names, month)
+    ]
 
 
 # --- Telegram ---
@@ -237,6 +311,30 @@ def get_bills_status(_user=Depends(verify_user)):
     ]
 
 
+@app.get("/api/bills/missing")
+def get_missing_payments(_user=Depends(verify_user)):
+    """Unpaid receipts from earlier months of the current year, per bill.
+
+    Only fully-elapsed months are reported (January through last month); the
+    current month is left out since it may not be due yet and is already shown
+    in the bills list. Each bill folder is specific to the current year.
+
+    One Drive listing per bill (not per month) and the listings run in
+    parallel, so the cost is a single concurrent batch of N calls.
+
+    Note: bills carry no start date, so months before a bill existed are
+    reported as missing too.
+    """
+    current_month = datetime.now(TIMEZONE).month
+    bills = supabase.table("bills").select("*").execute().data
+    folder_names = list_bill_folder_names(bills)
+
+    missing = []
+    for bill, file_names in zip(bills, folder_names):
+        missing.extend(earlier_unpaid_months(bill, file_names, current_month))
+    return missing
+
+
 def _urgency_dot(days: int) -> str:
     if days < 0:
         return "🔴"
@@ -260,10 +358,10 @@ def _due_phrase(days: int, plural: bool = False) -> str:
     return f"{verb} em {days} dias"
 
 
-def _build_reminder_message(notified: list[dict]) -> str:
-    """Telegram HTML message: headline + monospace table sorted by urgency.
+def _due_reminder_section(notified: list[dict]) -> str:
+    """Headline + monospace table sorted by urgency.
 
-    Expects `notified` already sorted by days_until_due ascending.
+    Expects `notified` non-empty and already sorted by days_until_due ascending.
     The headline groups every bill tied at the highest urgency.
     """
     top_days = notified[0]["days_until_due"]
@@ -285,6 +383,40 @@ def _build_reminder_message(notified: list[dict]) -> str:
     return f"{headline}\n\n<pre>{rows}</pre>"
 
 
+def _overdue_section(overdue: list[dict]) -> str:
+    """Warning block for receipts still missing from earlier months.
+
+    Expects `overdue` items as {name, month_name}; groups months by bill so each
+    bill shows once ("Água  Abril, Maio").
+    """
+    by_bill: dict[str, list[str]] = {}
+    for item in overdue:
+        by_bill.setdefault(item["name"], []).append(item["month_name"])
+    width = max(len(name) for name in by_bill)
+    rows = "\n".join(
+        html.escape(f"{name.ljust(width)}  {', '.join(months)}")
+        for name, months in by_bill.items()
+    )
+    return f"⚠️ <b>Contas de meses anteriores em aberto</b>\n<pre>{rows}</pre>"
+
+
+def _build_reminder_message(notified: list[dict], overdue: list[dict] | None = None) -> str:
+    """Telegram HTML message: a due-soon section and/or an earlier-months section.
+
+    Either part is omitted when empty, so the message can carry just the bills
+    due soon, just the overdue earlier months, or both. With neither, it returns
+    an all-clear so the daily scan still confirms nothing is pending.
+    """
+    sections = []
+    if notified:
+        sections.append(_due_reminder_section(notified))
+    if overdue:
+        sections.append(_overdue_section(overdue))
+    if not sections:
+        return "Todas as contas estão em dia :)"
+    return "\n\n".join(sections)
+
+
 @app.post("/api/cron/scan")
 def scan_due_bills(x_cron_secret: str | None = Header(default=None)):
     expected = os.getenv("CRON_SECRET")
@@ -294,18 +426,17 @@ def scan_due_bills(x_cron_secret: str | None = Header(default=None)):
     days_ahead = int(os.getenv("REMINDER_DAYS_AHEAD", "3"))
     today = datetime.now(TIMEZONE)
     bills = supabase.table("bills").select("*").execute().data
+    folder_names = list_bill_folder_names(bills)
 
     notified = []
-    for bill in bills:
+    overdue = []
+    for bill, file_names in zip(bills, folder_names):
         days = days_until_due(bill["due_day"], today)
-        if days > days_ahead:
-            continue
-        if check_payment_exists(bill["drive_folder_id"], today.month):
-            continue
-        notified.append({"name": bill["name"], "days_until_due": days})
+        if days <= days_ahead and not has_receipt(file_names, today.month):
+            notified.append({"name": bill["name"], "days_until_due": days})
+        overdue.extend(earlier_unpaid_months(bill, file_names, today.month))
 
-    if notified:
-        notified.sort(key=lambda b: b["days_until_due"])
-        send_telegram_message(_build_reminder_message(notified))
+    notified.sort(key=lambda b: b["days_until_due"])
+    send_telegram_message(_build_reminder_message(notified, overdue))
 
-    return {"checked": len(bills), "notified": notified}
+    return {"checked": len(bills), "notified": notified, "overdue": overdue}
