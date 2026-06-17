@@ -4,7 +4,12 @@ from unittest.mock import MagicMock, patch
 
 from app import config
 from app.services import drive
-from app.services.drive import check_payment_exists, get_drive_service
+from app.services.drive import (
+    check_payment_exists,
+    get_drive_service,
+    list_bill_folder_names,
+    list_folder_file_names,
+)
 
 from tests.conftest import drive_service_mock
 
@@ -71,3 +76,50 @@ def test_check_payment_http_error_returns_false():
 
     with patch.object(drive, "get_drive_service", return_value=svc):
         assert check_payment_exists("folder-id", 1) is False
+
+
+# ── list_folder_file_names ────────────────────────────────────────────────────
+
+def test_list_folder_file_names_pages_and_normalizes():
+    svc = MagicMock()
+    svc.files.return_value.list.return_value.execute.side_effect = [
+        {"nextPageToken": "page2", "files": [{"name": "Junho 2026.pdf"}]},
+        {"files": [{"name": "Maio 2026.pdf"}]},  # no token -> last page
+    ]
+
+    with patch.object(drive, "get_drive_service", return_value=svc):
+        names = list_folder_file_names("folder-id")
+
+    assert names == {"junho 2026.pdf", "maio 2026.pdf"}
+    assert svc.files.return_value.list.return_value.execute.call_count == 2
+
+
+def test_list_folder_file_names_http_error_returns_empty_set():
+    from googleapiclient.errors import HttpError
+
+    svc = MagicMock()
+    resp = MagicMock()
+    resp.status = 403
+    svc.files.return_value.list.return_value.execute.side_effect = HttpError(resp, b"Forbidden")
+
+    with patch.object(drive, "get_drive_service", return_value=svc):
+        assert list_folder_file_names("folder-id") == set()
+
+
+# ── list_bill_folder_names ────────────────────────────────────────────────────
+
+def test_list_bill_folder_names_empty_bills_returns_empty_list():
+    assert list_bill_folder_names([]) == []
+
+
+def test_list_bill_folder_names_aligns_with_bills_order():
+    bills = [
+        {"id": "1", "drive_folder_id": "f1"},
+        {"id": "2", "drive_folder_id": "f2"},
+    ]
+    per_folder = {"f1": {"junho 2026.pdf"}, "f2": {"maio 2026.pdf"}}
+
+    with patch.object(drive, "list_folder_file_names", side_effect=lambda fid: per_folder[fid]):
+        result = list_bill_folder_names(bills)
+
+    assert result == [{"junho 2026.pdf"}, {"maio 2026.pdf"}]

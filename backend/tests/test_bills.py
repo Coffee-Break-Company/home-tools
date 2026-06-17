@@ -3,6 +3,8 @@ from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
 
+from app import config
+from app.routers import bills as bills_router
 from app.services import drive
 from app.services.receipts import receipt_file_name
 from main import app
@@ -168,4 +170,61 @@ def test_upload_receipt_drive_error_returns_502(auth_client, fresh_supabase):
 def test_upload_receipt_requires_auth():
     with TestClient(app) as c:
         res = _upload_receipt(c)
+    assert res.status_code == 401
+
+
+# ── GET /api/bills/missing ────────────────────────────────────────────────────
+
+def test_get_missing_payments_reports_elapsed_months_without_receipt(auth_client, fresh_supabase):
+    now = datetime(2024, 6, 15, tzinfo=config.TIMEZONE)  # current month = June
+    bills = [
+        {"id": "1", "name": "Água", "due_day": 10, "drive_folder_id": "f1"},
+        {"id": "2", "name": "Luz", "due_day": 5, "drive_folder_id": "f2"},
+    ]
+    fresh_supabase.table.return_value.select.return_value.execute.return_value.data = bills
+    # Água: paid Jan–Apr, missing May. Luz: empty folder, missing Jan–May.
+    folders = [
+        {config.MONTHS_PT[m - 1] for m in range(1, 5)},
+        set(),
+    ]
+
+    with (
+        patch.object(bills_router, "datetime") as p_dt,
+        patch.object(drive, "list_bill_folder_names", return_value=folders),
+    ):
+        p_dt.now.return_value = now
+        res = auth_client.get("/api/bills/missing")
+
+    assert res.status_code == 200
+    missing = res.json()
+    assert [(m["name"], m["month_name"]) for m in missing] == [
+        ("Água", "Maio"),
+        ("Luz", "Janeiro"),
+        ("Luz", "Fevereiro"),
+        ("Luz", "Marco"),
+        ("Luz", "Abril"),
+        ("Luz", "Maio"),
+    ]
+
+
+def test_get_missing_payments_all_paid_returns_empty(auth_client, fresh_supabase):
+    now = datetime(2024, 6, 15, tzinfo=config.TIMEZONE)
+    bills = [{"id": "1", "name": "Água", "due_day": 10, "drive_folder_id": "f1"}]
+    fresh_supabase.table.return_value.select.return_value.execute.return_value.data = bills
+    paid_through_may = [{config.MONTHS_PT[m - 1] for m in range(1, 6)}]
+
+    with (
+        patch.object(bills_router, "datetime") as p_dt,
+        patch.object(drive, "list_bill_folder_names", return_value=paid_through_may),
+    ):
+        p_dt.now.return_value = now
+        res = auth_client.get("/api/bills/missing")
+
+    assert res.status_code == 200
+    assert res.json() == []
+
+
+def test_get_missing_payments_no_token():
+    with TestClient(app) as c:
+        res = c.get("/api/bills/missing")
     assert res.status_code == 401
