@@ -6,6 +6,7 @@ import base64
 import calendar
 import unicodedata
 from uuid import uuid4
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import httpx
@@ -112,6 +113,48 @@ def check_payment_exists(drive_folder_id: str, month: int) -> bool:
 
     except HttpError:
         return False
+
+
+def list_folder_file_names(drive_folder_id: str) -> set[str]:
+    """Normalized names of every file in a folder, in a single listing.
+
+    One call returns receipts for all months/years, so callers can check the
+    whole year locally instead of querying Drive month by month. Builds its own
+    service so it is safe to run from a worker thread (the googleapiclient
+    http transport is not thread-safe). Pages through large folders. Returns an
+    empty set on Drive errors, mirroring check_payment_exists' fail-as-unpaid.
+    """
+    try:
+        service = get_drive_service()
+        names: set[str] = set()
+        page_token = None
+        while True:
+            result = service.files().list(
+                q=f"'{drive_folder_id}' in parents and trashed = false",
+                fields="nextPageToken, files(name)",
+                pageSize=1000,
+                pageToken=page_token,
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
+            ).execute()
+            for file in result.get("files", []):
+                names.add(normalize(file["name"]))
+            page_token = result.get("nextPageToken")
+            if not page_token:
+                return names
+    except HttpError:
+        return set()
+
+
+def has_receipt(file_names: set[str], month: int) -> bool:
+    """True if a receipt for the given month is among the file names.
+
+    Receipts are named by month only ("Junho.pdf"); the year lives in the
+    folder, so each bill folder holds a single year's receipts. Matches the
+    month name as a prefix, accent-insensitively (see normalize).
+    """
+    month_normalized = MONTHS_PT[month - 1]
+    return any(name.startswith(month_normalized) for name in file_names)
 
 
 # --- Telegram ---
@@ -235,6 +278,43 @@ def get_bills_status(_user=Depends(verify_user)):
         {**bill, "paid": check_payment_exists(bill["drive_folder_id"], month)}
         for bill in bills
     ]
+
+
+@app.get("/api/bills/missing")
+def get_missing_payments(_user=Depends(verify_user)):
+    """Unpaid receipts from earlier months of the current year, per bill.
+
+    Only fully-elapsed months are reported (January through last month); the
+    current month is left out since it may not be due yet and is already shown
+    in the bills list. Each bill folder is specific to the current year.
+
+    One Drive listing per bill (not per month) and the listings run in
+    parallel, so the cost is a single concurrent batch of N calls.
+
+    Note: bills carry no start date, so months before a bill existed are
+    reported as missing too.
+    """
+    current_month = datetime.now(TIMEZONE).month
+
+    bills = supabase.table("bills").select("*").execute().data
+    if not bills:
+        return []
+
+    with ThreadPoolExecutor(max_workers=min(8, len(bills))) as executor:
+        folder_file_names = executor.map(
+            lambda bill: list_folder_file_names(bill["drive_folder_id"]), bills
+        )
+
+    missing = []
+    for bill, file_names in zip(bills, folder_file_names):
+        for month in range(1, current_month):
+            if not has_receipt(file_names, month):
+                missing.append({
+                    "name": bill["name"],
+                    "month": month,
+                    "month_name": MONTHS_PT[month - 1].capitalize(),
+                })
+    return missing
 
 
 def _urgency_dot(days: int) -> str:
