@@ -8,6 +8,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { ManageBillsModal } from '@/components/ManageBillsModal'
 import { UploadReceiptModal } from '@/components/UploadReceiptModal'
+import { OverdueInfoModal } from '@/components/OverdueInfoModal'
 import { api } from '@/lib/api'
 
 type Bill = {
@@ -48,6 +49,7 @@ export function Bills() {
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [uploadBill, setUploadBill] = useState<Bill | null>(null)
+  const [overdueInfoOpen, setOverdueInfoOpen] = useState(false)
 
   const now = new Date()
   const currentMonth = now.getMonth()
@@ -197,28 +199,32 @@ export function Bills() {
           </div>
         )}
 
-        {/* Overdue from earlier months */}
+        {/* Overdue from earlier months — opens an info modal on click */}
         {!loading && missingByBill.length > 0 && (
-          <div className="mt-10 rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3.5">
-            <div className="flex items-center gap-2.5">
+          <button
+            type="button"
+            onClick={() => setOverdueInfoOpen(true)}
+            className="mt-10 block w-full rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3.5 text-left transition-colors hover:bg-amber-500/10"
+          >
+            <span className="flex items-center gap-2.5">
               <AlertTriangle className="size-4 shrink-0 text-amber-400" strokeWidth={1.5} />
               <span className="text-sm font-medium text-foreground">
                 Contas de meses anteriores em aberto
               </span>
-            </div>
-            <ul className="mt-3 flex flex-col gap-2">
+            </span>
+            <span className="mt-3 flex flex-col gap-2">
               {missingByBill.map(({ name, months }) => {
                 const Icon = iconForBill(name)
                 return (
-                  <li key={name} className="flex items-center gap-2.5 text-xs">
+                  <span key={name} className="flex items-center gap-2.5 text-xs">
                     <Icon className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.5} />
                     <span className="font-medium text-foreground">{name}</span>
                     <span className="text-muted-foreground">{months.join(', ')}</span>
-                  </li>
+                  </span>
                 )
               })}
-            </ul>
-          </div>
+            </span>
+          </button>
         )}
 
       </div>
@@ -237,6 +243,13 @@ export function Bills() {
             setUploadBill(null)
             refresh()
           }}
+        />
+      )}
+
+      {overdueInfoOpen && (
+        <OverdueInfoModal
+          items={missingByBill}
+          onClose={() => setOverdueInfoOpen(false)}
         />
       )}
     </div>

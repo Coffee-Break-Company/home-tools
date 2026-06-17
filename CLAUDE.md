@@ -15,6 +15,7 @@ This is a monorepo with two independently deployed apps:
 
 ## Git conventions
 
+- **Never commit directly to `main`/`master`** — always work on a branch and open a PR.
 - **Commit messages must be a single line** — subject only, no body and no trailers.
 - **Commit in small, focused commits**, one logical change each (e.g. backend and frontend changes separated).
 
