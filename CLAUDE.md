@@ -13,6 +13,11 @@ This is a monorepo with two independently deployed apps:
 - `frontend/` — Vite + React 19 + TypeScript + Tailwind v4 + shadcn/ui, hosted on Vercel.
 - `backend/` — FastAPI (Python 3.12, managed with `uv`), hosted on Render via Docker (`render.yaml`, `backend/Dockerfile`).
 
+## Git conventions
+
+- **Commit messages must be a single line** — subject only, no body and no trailers.
+- **Commit in small, focused commits**, one logical change each (e.g. backend and frontend changes separated).
+
 ## Commands
 
 Backend (run from `backend/`):
