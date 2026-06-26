@@ -70,7 +70,8 @@ def test_scan_skips_paid_bill(monkeypatch, fresh_supabase):
     assert res.status_code == 200
     assert res.json()["notified"] == []
     assert res.json()["overdue"] == []
-    p_send.assert_called_once_with("Todas as contas estão em dia :)")
+    assert res.json()["sent"] is False
+    p_send.assert_not_called()
 
 
 def test_scan_skips_bill_far_from_due(monkeypatch, fresh_supabase):
@@ -91,7 +92,8 @@ def test_scan_skips_bill_far_from_due(monkeypatch, fresh_supabase):
     assert res.status_code == 200
     assert res.json()["notified"] == []
     assert res.json()["overdue"] == []
-    p_send.assert_called_once_with("Todas as contas estão em dia :)")
+    assert res.json()["sent"] is False
+    p_send.assert_not_called()
 
 
 def test_scan_notifies_overdue_earlier_months(monkeypatch, fresh_supabase):

@@ -37,6 +37,9 @@ def scan_due_bills(x_cron_secret: str | None = Header(default=None)):
         overdue.extend(payments.earlier_unpaid_months(bill, file_names, today.month))
 
     notified.sort(key=lambda b: b["days_until_due"])
-    telegram.send_telegram_message(reminders.build_reminder_message(notified, overdue))
 
-    return {"checked": len(bills), "notified": notified, "overdue": overdue}
+    sent = bool(notified or overdue)
+    if sent:
+        telegram.send_telegram_message(reminders.build_reminder_message(notified, overdue))
+
+    return {"checked": len(bills), "notified": notified, "overdue": overdue, "sent": sent}
