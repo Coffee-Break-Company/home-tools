@@ -119,3 +119,49 @@ def test_scan_notifies_overdue_earlier_months(monkeypatch, fresh_supabase):
         "Janeiro", "Fevereiro", "Marco", "Abril", "Maio",
     ]
     p_send.assert_called_once()
+
+
+def test_scan_skips_months_before_the_bill_started(monkeypatch, fresh_supabase):
+    """A bill added this month has no backlog, so nothing is sent."""
+    monkeypatch.setenv("CRON_SECRET", "secret")
+    now = datetime(2024, 6, 15, tzinfo=config.TIMEZONE)
+    bills = [{"id": "1", "name": "Água", "due_day": 25, "drive_folder_id": "f1",
+              "start_date": "2024-06-15"}]
+    fresh_supabase.table.return_value.select.return_value.execute.return_value.data = bills
+
+    with (
+        patch.object(cron, "datetime") as p_dt,
+        patch.object(drive, "list_bill_folder_names", return_value=[set()]),
+        patch.object(telegram, "send_telegram_message") as p_send,
+    ):
+        p_dt.now.return_value = now
+        with TestClient(app) as c:
+            res = c.post("/api/cron/scan", headers={"X-Cron-Secret": "secret"})
+
+    assert res.status_code == 200
+    assert res.json()["overdue"] == []
+    assert res.json()["sent"] is False
+    p_send.assert_not_called()
+
+
+def test_scan_skips_bill_starting_in_a_later_month(monkeypatch, fresh_supabase):
+    monkeypatch.setenv("CRON_SECRET", "secret")
+    now = datetime(2024, 6, 15, tzinfo=config.TIMEZONE)
+    # Due day 16 would be within the window, but the bill only starts in July.
+    bills = [{"id": "1", "name": "Energia", "due_day": 16, "drive_folder_id": "f1",
+              "start_date": "2024-07-01"}]
+    fresh_supabase.table.return_value.select.return_value.execute.return_value.data = bills
+
+    with (
+        patch.object(cron, "datetime") as p_dt,
+        patch.object(drive, "list_bill_folder_names", return_value=[set()]),
+        patch.object(telegram, "send_telegram_message") as p_send,
+    ):
+        p_dt.now.return_value = now
+        with TestClient(app) as c:
+            res = c.post("/api/cron/scan", headers={"X-Cron-Secret": "secret"})
+
+    assert res.status_code == 200
+    assert res.json()["notified"] == []
+    assert res.json()["sent"] is False
+    p_send.assert_not_called()

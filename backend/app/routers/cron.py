@@ -31,10 +31,13 @@ def scan_due_bills(x_cron_secret: str | None = Header(default=None)):
     notified = []
     overdue = []
     for bill, file_names in zip(bills, folder_names):
+        # Bills whose start date is still ahead are not charged yet at all.
+        if not payments.has_started(bill, today):
+            continue
         days = days_until_due(bill["due_day"], today)
         if days <= days_ahead and not payments.has_receipt(file_names, today.month):
             notified.append({"name": bill["name"], "days_until_due": days})
-        overdue.extend(payments.earlier_unpaid_months(bill, file_names, today.month))
+        overdue.extend(payments.earlier_unpaid_months(bill, file_names, today))
 
     notified.sort(key=lambda b: b["days_until_due"])
 
