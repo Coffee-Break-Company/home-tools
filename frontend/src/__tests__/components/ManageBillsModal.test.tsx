@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 vi.mock('@/lib/api', () => ({
@@ -17,10 +17,11 @@ vi.mock('@/components/ui/dialog', () => ({
 
 import { ManageBillsModal } from '@/components/ManageBillsModal'
 import { api } from '@/lib/api'
+import { currentMonthValue } from '@/lib/months'
 
 const mockBills = [
-  { id: '1', name: 'Internet', due_day: 10, drive_folder_id: 'folder-1' },
-  { id: '2', name: 'Energia', due_day: 15, drive_folder_id: 'folder-2' },
+  { id: '1', name: 'Internet', due_day: 10, drive_folder_id: 'folder-1', start_date: '2026-03-01' },
+  { id: '2', name: 'Energia', due_day: 15, drive_folder_id: 'folder-2', start_date: null },
 ]
 
 function makeJsonResponse(data: unknown) {
@@ -84,9 +85,40 @@ describe('ManageBillsModal', () => {
         name: 'Água',
         due_day: 5,
         drive_folder_id: 'folder-xyz',
+        start_date: `${currentMonthValue()}-01`,
       }),
     )
     expect(onRefresh).toHaveBeenCalled()
+  })
+
+  it('sends the chosen start month as the first day of that month', async () => {
+    const user = userEvent.setup()
+    render(<ManageBillsModal open onClose={onClose} onRefresh={onRefresh} />)
+
+    await waitFor(() => expect(api.get).toHaveBeenCalled())
+
+    await user.type(screen.getByPlaceholderText('Nome da conta'), 'Água')
+    await user.type(screen.getByPlaceholderText('Dia de vencimento'), '5')
+    await user.type(screen.getByPlaceholderText('ID da pasta no Google Drive'), 'folder-xyz')
+    fireEvent.change(screen.getByLabelText('Início da cobrança'), {
+      target: { value: '2026-03' },
+    })
+    await user.click(screen.getByRole('button', { name: 'Adicionar' }))
+
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith(
+        '/api/bills',
+        expect.objectContaining({ start_date: '2026-03-01' }),
+      ),
+    )
+  })
+
+  it('shows the start month of a bill that has one', async () => {
+    render(<ManageBillsModal open onClose={onClose} onRefresh={onRefresh} />)
+
+    await waitFor(() =>
+      expect(screen.getByText(/desde Mar\/2026/)).toBeInTheDocument(),
+    )
   })
 
   it('does not submit when the form is incomplete', async () => {

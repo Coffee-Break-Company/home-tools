@@ -29,9 +29,17 @@ def get_bills(_user=Depends(verify_user)):
 
 @router.post("", status_code=201)
 def create_bill(bill: BillCreate, _user=Depends(verify_user)):
+    """Registers a bill, defaulting its start date to today.
+
+    The start date is what keeps a brand-new bill from being reported as unpaid
+    for every month of the year that preceded it.
+    """
+    data = bill.model_dump()
+    start = data["start_date"] or datetime.now(config.TIMEZONE).date()
     res = config.supabase.table("bills").insert({
         "id": str(uuid4()),
-        **bill.model_dump(),
+        **data,
+        "start_date": start.isoformat(),
     }).execute()
     return res.data[0]
 
@@ -101,14 +109,13 @@ def get_missing_payments(_user=Depends(verify_user)):
     One Drive listing per bill (not per month) and the listings run in
     parallel, so the cost is a single concurrent batch of N calls.
 
-    Note: bills carry no start date, so months before a bill existed are
-    reported as missing too.
+    Months before a bill's start date are skipped: no payment was ever due.
     """
-    current_month = datetime.now(config.TIMEZONE).month
+    today = datetime.now(config.TIMEZONE)
     bills = config.supabase.table("bills").select("*").execute().data
     folder_names = drive.list_bill_folder_names(bills)
 
     missing = []
     for bill, file_names in zip(bills, folder_names):
-        missing.extend(payments.earlier_unpaid_months(bill, file_names, current_month))
+        missing.extend(payments.earlier_unpaid_months(bill, file_names, today))
     return missing

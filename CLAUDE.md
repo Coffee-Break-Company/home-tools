@@ -51,7 +51,8 @@ There is no payment record in the database. A bill is considered **paid for a gi
 
 Consequences when changing anything related to payments:
 
-- `bills` rows store only `id`, `name`, `due_day`, and `drive_folder_id`. The folder is the source of truth for payment.
+- `bills` rows store only `id`, `name`, `due_day`, `drive_folder_id`, and `start_date`. The folder is the source of truth for payment.
+- `start_date` is the first month the bill is charged for. Months before it are never reported as unpaid (`first_charged_month` / `has_started` in `backend/app/services/payments.py`), so a newly added bill doesn't produce a backlog of alerts. It is nullable — bills created before the column existed are charged from January, as before.
 - Uploading a receipt (`POST /api/bills/{id}/receipt`) writes a month-named file into the bill's Drive folder; `receipt_file_name()` must keep producing names that `check_payment_exists` matches.
 - Month-vs-year edge cases are handled deliberately (a `due_day` past month end is clamped; a receipt month ahead of the current month is treated as the previous year). Preserve this logic.
 

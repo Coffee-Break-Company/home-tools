@@ -37,6 +37,28 @@ def test_create_bill_success(auth_client, fresh_supabase):
     assert res.json()["name"] == "Water"
 
 
+def test_create_bill_defaults_start_date_to_today(auth_client, fresh_supabase):
+    created = {"id": "new-id", "name": "Water", "due_day": 5, "drive_folder_id": "f2"}
+    fresh_supabase.table.return_value.insert.return_value.execute.return_value.data = [created]
+
+    auth_client.post("/api/bills", json={"name": "Water", "due_day": 5, "drive_folder_id": "f2"})
+
+    inserted = fresh_supabase.table.return_value.insert.call_args.args[0]
+    assert inserted["start_date"] == datetime.now(config.TIMEZONE).date().isoformat()
+
+
+def test_create_bill_keeps_an_explicit_start_date(auth_client, fresh_supabase):
+    created = {"id": "new-id", "name": "Water", "due_day": 5, "drive_folder_id": "f2"}
+    fresh_supabase.table.return_value.insert.return_value.execute.return_value.data = [created]
+
+    auth_client.post("/api/bills", json={
+        "name": "Water", "due_day": 5, "drive_folder_id": "f2", "start_date": "2026-03-01",
+    })
+
+    inserted = fresh_supabase.table.return_value.insert.call_args.args[0]
+    assert inserted["start_date"] == "2026-03-01"
+
+
 def test_create_bill_no_token():
     with TestClient(app) as c:
         res = c.post("/api/bills", json={"name": "Water", "due_day": 5, "drive_folder_id": "f2"})
@@ -222,6 +244,23 @@ def test_get_missing_payments_all_paid_returns_empty(auth_client, fresh_supabase
 
     assert res.status_code == 200
     assert res.json() == []
+
+
+def test_get_missing_payments_ignores_months_before_the_bill_started(auth_client, fresh_supabase):
+    now = datetime(2024, 6, 15, tzinfo=config.TIMEZONE)  # current month = June
+    bills = [{"id": "1", "name": "Água", "due_day": 10, "drive_folder_id": "f1",
+              "start_date": "2024-04-20"}]
+    fresh_supabase.table.return_value.select.return_value.execute.return_value.data = bills
+
+    with (
+        patch.object(bills_router, "datetime") as p_dt,
+        patch.object(drive, "list_bill_folder_names", return_value=[set()]),
+    ):
+        p_dt.now.return_value = now
+        res = auth_client.get("/api/bills/missing")
+
+    assert res.status_code == 200
+    assert [m["month_name"] for m in res.json()] == ["Abril", "Maio"]
 
 
 def test_get_missing_payments_no_token():
