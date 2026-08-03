@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { Paperclip } from 'lucide-react'
 import { api } from '@/lib/api'
+import { MONTH_NAMES_FULL } from '@/lib/months'
 import {
   Dialog,
   DialogContent,
@@ -13,11 +14,6 @@ type Props = {
   onClose: () => void
   onSuccess: () => void
 }
-
-const MONTHS = [
-  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
-  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
-]
 
 export function UploadReceiptModal({ bill, onClose, onSuccess }: Props) {
   const [month, setMonth] = useState(new Date().getMonth() + 1)
@@ -69,7 +65,7 @@ export function UploadReceiptModal({ bill, onClose, onSuccess }: Props) {
               onChange={(e) => setMonth(Number(e.target.value))}
               className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             >
-              {MONTHS.map((name, i) => (
+              {MONTH_NAMES_FULL.map((name, i) => (
                 <option key={name} value={i + 1}>{name}</option>
               ))}
             </select>

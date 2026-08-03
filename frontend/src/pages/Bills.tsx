@@ -10,6 +10,7 @@ import { ManageBillsModal } from '@/components/ManageBillsModal'
 import { UploadReceiptModal } from '@/components/UploadReceiptModal'
 import { OverdueInfoModal } from '@/components/OverdueInfoModal'
 import { api } from '@/lib/api'
+import { MONTH_NAMES_FULL, MONTH_NAMES_SHORT } from '@/lib/months'
 
 type Bill = {
   id: string
@@ -24,13 +25,6 @@ type MissingPayment = {
   month: number
   month_name: string
 }
-
-const MONTH_NAMES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
-
-const MONTH_NAMES_FULL = [
-  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
-  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
-]
 
 export function iconForBill(name: string): LucideIcon {
   const n = name.toLowerCase()
@@ -170,7 +164,7 @@ export function Bills() {
                   <span className="flex-1 text-sm font-medium text-foreground">{bill.name}</span>
 
                   <span className="text-xs text-muted-foreground">
-                    Dia {bill.due_day} {MONTH_NAMES[currentMonth]}
+                    Dia {bill.due_day} {MONTH_NAMES_SHORT[currentMonth]}
                   </span>
 
                   {bill.paid ? (

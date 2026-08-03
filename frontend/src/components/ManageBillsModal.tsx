@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Trash2 } from 'lucide-react'
 import { api } from '@/lib/api'
+import { currentMonthValue, formatMonthYear } from '@/lib/months'
 import {
   Dialog,
   DialogContent,
@@ -14,6 +15,7 @@ type Bill = {
   name: string
   due_day: number
   drive_folder_id: string
+  start_date: string | null
 }
 
 type Props = {
@@ -22,7 +24,14 @@ type Props = {
   onRefresh: () => void
 }
 
-const emptyForm = { name: '', due_day: '', drive_folder_id: '' }
+// start_month defaults to the current month: a new bill is only charged from
+// the month it was registered, so earlier months are never flagged as overdue.
+const emptyForm = () => ({
+  name: '',
+  due_day: '',
+  drive_folder_id: '',
+  start_month: currentMonthValue(),
+})
 
 export function ManageBillsModal({ open, onClose, onRefresh }: Props) {
   const [bills, setBills] = useState<Bill[]>([])
@@ -36,10 +45,15 @@ export function ManageBillsModal({ open, onClose, onRefresh }: Props) {
 
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault()
-    if (!form.name || !form.due_day || !form.drive_folder_id) return
+    if (!form.name || !form.due_day || !form.drive_folder_id || !form.start_month) return
     setSubmitting(true)
-    await api.post('/api/bills', { ...form, due_day: Number(form.due_day) })
-    setForm(emptyForm)
+    const { start_month, ...rest } = form
+    await api.post('/api/bills', {
+      ...rest,
+      due_day: Number(form.due_day),
+      start_date: `${start_month}-01`,
+    })
+    setForm(emptyForm())
     await fetchBills()
     onRefresh()
     setSubmitting(false)
@@ -75,7 +89,10 @@ export function ManageBillsModal({ open, onClose, onRefresh }: Props) {
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-foreground">{bill.name}</p>
                 <p className="text-xs text-muted-foreground">
-                  Dia {bill.due_day} · <span className="font-mono">{bill.drive_folder_id}</span>
+                  Dia {bill.due_day}
+                  {bill.start_date && ` · desde ${formatMonthYear(bill.start_date)}`}
+                  {' · '}
+                  <span className="font-mono">{bill.drive_folder_id}</span>
                 </p>
               </div>
               <button
@@ -116,6 +133,18 @@ export function ManageBillsModal({ open, onClose, onRefresh }: Props) {
               value={form.drive_folder_id}
               onChange={(e) => setForm({ ...form, drive_folder_id: e.target.value })}
             />
+            <label className="flex flex-col gap-1.5 text-xs font-medium text-muted-foreground">
+              Início da cobrança
+              <Input
+                type="month"
+                value={form.start_month}
+                onChange={(e) => setForm({ ...form, start_month: e.target.value })}
+              />
+            </label>
+            <p className="text-xs text-muted-foreground">
+              Meses anteriores a essa data não entram nos avisos de comprovante
+              em falta.
+            </p>
           </div>
           <button
             type="submit"
