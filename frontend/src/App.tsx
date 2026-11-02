@@ -4,6 +4,7 @@ import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { Login } from '@/pages/Login'
 import { Home } from '@/pages/Home'
 import { Bills } from '@/pages/Bills'
+import { Expenses } from '@/pages/Expenses'
 
 function App() {
   return (
@@ -23,6 +24,14 @@ function App() {
           element={
             <ProtectedRoute>
               <Bills />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/gastos"
+          element={
+            <ProtectedRoute>
+              <Expenses />
             </ProtectedRoute>
           }
         />
