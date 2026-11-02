@@ -20,3 +20,8 @@ global.ResizeObserver = vi.fn().mockImplementation(() => ({
   unobserve: vi.fn(),
   disconnect: vi.fn(),
 }))
+
+// jsdom has no PointerEvent; Base UI's Switch dispatches one to toggle.
+if (!('PointerEvent' in window)) {
+  Object.defineProperty(window, 'PointerEvent', { writable: true, value: MouseEvent })
+}
