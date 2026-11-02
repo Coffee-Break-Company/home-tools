@@ -186,3 +186,48 @@ def test_list_expenses_requires_login():
     with TestClient(app) as c:
         res = c.get("/api/expenses")
     assert res.status_code == 401
+
+
+# ── logs ──────────────────────────────────────────────────────────────────────
+
+def test_ingest_logs_registered_expense(client, caplog):
+    with caplog.at_level("INFO", logger="app.routers.expenses"):
+        client.post("/api/expenses/ingest", headers=HEADERS,
+                    json={"amount": "R$ 42,90", "merchant": "Padaria", "card": "Nubank"})
+    assert "Gasto registrado" in caplog.text
+    assert "valor=42.90" in caplog.text
+
+
+def test_ingest_logs_unparseable_amount_and_date(client, caplog):
+    client.post("/api/expenses/ingest", headers=HEADERS,
+                json={"amount": "???", "occurred_at": "ontem"})
+    assert "Valor não reconhecido '???'" in caplog.text
+    assert "Data não reconhecida 'ontem'" in caplog.text
+
+
+def test_ingest_logs_wrong_token_without_leaking_it(client, caplog):
+    client.post("/api/expenses/ingest", json={"amount": "1"},
+                headers={"X-Shortcut-Token": "segredo-errado"})
+    assert "Token do atalho inválido (header presente)" in caplog.text
+    assert "segredo-errado" not in caplog.text
+
+
+def test_ingest_logs_and_returns_502_when_supabase_fails(client, fresh_supabase, caplog):
+    fresh_supabase.table.return_value.insert.return_value.execute.side_effect = RuntimeError("down")
+    res = client.post("/api/expenses/ingest", headers=HEADERS,
+                      json={"amount": "R$ 10,00", "merchant": "Loja"})
+    assert res.status_code == 502
+    assert "Falha ao salvar o gasto" in caplog.text
+    assert "'merchant': 'Loja'" in caplog.text
+
+
+def test_ingest_logs_validation_errors(client, caplog):
+    res = client.post("/api/expenses/ingest", headers=HEADERS, json={"test": "talvez"})
+    assert res.status_code == 422
+    assert "Requisição do atalho rejeitada (422)" in caplog.text
+    assert "talvez" in caplog.text
+
+
+def test_validation_errors_on_other_routes_are_not_logged(auth_client, caplog):
+    auth_client.post("/api/bills", json={"name": "Água"})
+    assert "rejeitada" not in caplog.text

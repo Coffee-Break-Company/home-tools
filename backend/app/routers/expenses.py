@@ -11,8 +11,13 @@ stored as null (with the raw payload kept) instead of failing the request.
 
 Rows sent with `test: true` are stored with is_test=true; any query over real
 spending must filter them out, and DELETE /api/expenses/test wipes them.
+
+Every outcome of an ingest is logged (with the raw values that caused a
+fallback), since nobody watches the phone when the automation runs — the
+Render logs are the only place a problem shows up. The token is never logged.
 """
 
+import logging
 import os
 import re
 from datetime import datetime
@@ -25,12 +30,20 @@ from app.auth import verify_user
 from app.models import ExpenseIngest
 from app.utils import parse_amount
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/expenses", tags=["expenses"])
 
 
 def _check_token(token: str | None) -> None:
     expected = os.getenv("SHORTCUT_TOKEN")
-    if not expected or token != expected:
+    if not expected:
+        logger.error("SHORTCUT_TOKEN não configurado; requisição do atalho recusada")
+        raise HTTPException(status_code=401, detail="Não autorizado")
+    if token != expected:
+        logger.warning(
+            "Token do atalho inválido (header %s)", "presente" if token else "ausente",
+        )
         raise HTTPException(status_code=401, detail="Não autorizado")
 
 
@@ -44,6 +57,8 @@ def _parse_occurred_at(text: str | None) -> datetime:
     try:
         occurred_at = datetime.fromisoformat((text or "").strip())
     except ValueError:
+        if text:
+            logger.warning("Data não reconhecida %r; usando o horário atual", text)
         return datetime.now(config.TIMEZONE)
     if occurred_at.tzinfo is None:
         occurred_at = occurred_at.replace(tzinfo=config.TIMEZONE)
@@ -61,6 +76,7 @@ def ingest_expense(payload: ExpenseIngest, x_shortcut_token: str | None = Header
         amount = None
     if amount is None:
         warning = "Valor ausente ou não reconhecido; gasto salvo sem valor"
+        logger.warning("Valor não reconhecido %r; gasto salvo sem valor", payload.amount)
 
     occurred_at = _parse_occurred_at(payload.occurred_at)
 
@@ -74,7 +90,17 @@ def ingest_expense(payload: ExpenseIngest, x_shortcut_token: str | None = Header
         "is_test": payload.test,
         "raw": payload.model_dump(mode="json"),
     }
-    saved = config.supabase.table("expenses").insert(row).execute().data[0]
+    try:
+        saved = config.supabase.table("expenses").insert(row).execute().data[0]
+    except Exception:
+        # The payload goes into the log so the expense can be recovered by hand.
+        logger.exception("Falha ao salvar o gasto no Supabase; payload=%s", row["raw"])
+        raise HTTPException(status_code=502, detail="Falha ao salvar o gasto")
+
+    logger.info(
+        "Gasto registrado id=%s valor=%s estabelecimento=%r cartao=%r teste=%s",
+        row["id"], row["amount"], row["merchant"], row["card"], row["is_test"],
+    )
     return {**saved, "warning": warning}
 
 
