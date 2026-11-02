@@ -13,3 +13,7 @@ create table if not exists expenses (
 );
 
 create index if not exists expenses_occurred_at_idx on expenses (occurred_at desc) where not is_test;
+
+-- Sem políticas: só o backend (chave secret, que ignora RLS) acessa a tabela.
+-- A chave anon, pública no frontend, não lê nem escreve nada.
+alter table expenses enable row level security;

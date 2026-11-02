@@ -8,3 +8,6 @@ create table if not exists bills (
     drive_folder_id text not null,
     start_date      date               -- primeiro mês cobrado; nulo = cobrada desde janeiro
 );
+
+-- Sem políticas: só o backend (chave secret, que ignora RLS) acessa a tabela.
+alter table bills enable row level security;

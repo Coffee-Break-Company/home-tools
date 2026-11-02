@@ -4,3 +4,6 @@
 create table if not exists allowed_emails (
     email text primary key
 );
+
+-- Sem políticas: só o backend (chave secret, que ignora RLS) acessa a tabela.
+alter table allowed_emails enable row level security;
