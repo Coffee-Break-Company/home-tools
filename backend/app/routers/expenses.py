@@ -14,12 +14,14 @@ spending must filter them out, and DELETE /api/expenses/test wipes them.
 """
 
 import os
+import re
 from datetime import datetime
 from uuid import uuid4
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 
 from app import config
+from app.auth import verify_user
 from app.models import ExpenseIngest
 from app.utils import parse_amount
 
@@ -74,6 +76,38 @@ def ingest_expense(payload: ExpenseIngest, x_shortcut_token: str | None = Header
     }
     saved = config.supabase.table("expenses").insert(row).execute().data[0]
     return {**saved, "warning": warning}
+
+
+def _month_bounds(month: str) -> tuple[datetime, datetime]:
+    """São Paulo midnight on the 1st of `month` ("2026-11") and of the next one."""
+    match = re.fullmatch(r"(\d{4})-(\d{2})", month)
+    if not match or not 1 <= int(match.group(2)) <= 12:
+        raise HTTPException(status_code=400, detail="Mês inválido")
+    year, mon = int(match.group(1)), int(match.group(2))
+    start = datetime(year, mon, 1, tzinfo=config.TIMEZONE)
+    end = datetime(year + mon // 12, mon % 12 + 1, 1, tzinfo=config.TIMEZONE)
+    return start, end
+
+
+@router.get("")
+def list_expenses(month: str | None = None, test: bool = False, _user=Depends(verify_user)):
+    """Expenses of one month (default: the current one), newest first.
+
+    `test=true` returns only the fake rows sent with `test: true`, so the UI can
+    be exercised without mixing them into real spending.
+    """
+    month = month or datetime.now(config.TIMEZONE).strftime("%Y-%m")
+    start, end = _month_bounds(month)
+    res = (
+        config.supabase.table("expenses")
+        .select("id, amount, merchant, card, occurred_at, source")
+        .eq("is_test", test)
+        .gte("occurred_at", start.isoformat())
+        .lt("occurred_at", end.isoformat())
+        .order("occurred_at", desc=True)
+        .execute()
+    )
+    return res.data
 
 
 @router.delete("/test")

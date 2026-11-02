@@ -135,3 +135,54 @@ def test_delete_test_expenses_requires_token(client, fresh_supabase):
     res = client.delete("/api/expenses/test", headers={"X-Shortcut-Token": "wrong"})
     assert res.status_code == 401
     fresh_supabase.table.return_value.delete.assert_not_called()
+
+
+# ── GET /api/expenses ─────────────────────────────────────────────────────────
+
+def _list_query(fresh_supabase):
+    """The chain select().eq().gte().lt().order() and its execute()."""
+    select = fresh_supabase.table.return_value.select
+    eq = select.return_value.eq
+    gte = eq.return_value.gte
+    lt = gte.return_value.lt
+    order = lt.return_value.order
+    return eq, gte, lt, order
+
+
+def test_list_expenses_filters_month_and_real_rows(auth_client, fresh_supabase):
+    eq, gte, lt, order = _list_query(fresh_supabase)
+    rows = [{"id": "1", "amount": 42.9, "merchant": "Padaria"}]
+    order.return_value.execute.return_value.data = rows
+
+    res = auth_client.get("/api/expenses?month=2026-11")
+
+    assert res.status_code == 200
+    assert res.json() == rows
+    eq.assert_called_once_with("is_test", False)
+    gte.assert_called_once_with("occurred_at", "2026-11-01T00:00:00-03:00")
+    lt.assert_called_once_with("occurred_at", "2026-12-01T00:00:00-03:00")
+    order.assert_called_once_with("occurred_at", desc=True)
+
+
+def test_list_expenses_december_rolls_into_next_year(auth_client, fresh_supabase):
+    _, _, lt, _ = _list_query(fresh_supabase)
+    auth_client.get("/api/expenses?month=2026-12")
+    lt.assert_called_once_with("occurred_at", "2027-01-01T00:00:00-03:00")
+
+
+def test_list_expenses_test_flag_returns_only_test_rows(auth_client, fresh_supabase):
+    eq, _, _, _ = _list_query(fresh_supabase)
+    auth_client.get("/api/expenses?month=2026-11&test=true")
+    eq.assert_called_once_with("is_test", True)
+
+
+@pytest.mark.parametrize("month", ["2026-13", "2026-1", "novembro"])
+def test_list_expenses_invalid_month_returns_400(auth_client, month):
+    res = auth_client.get(f"/api/expenses?month={month}")
+    assert res.status_code == 400
+
+
+def test_list_expenses_requires_login():
+    with TestClient(app) as c:
+        res = c.get("/api/expenses")
+    assert res.status_code == 401
