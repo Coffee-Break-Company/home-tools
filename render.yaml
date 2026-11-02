@@ -21,3 +21,5 @@ services:
         sync: false
       - key: REMINDER_DAYS_AHEAD
         sync: false
+      - key: SHORTCUT_TOKEN
+        sync: false

@@ -7,7 +7,7 @@ The actual logic lives under the `app` package — `app.routers` for endpoints,
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import auth, bills, cron, health
+from app.routers import auth, bills, cron, expenses, health
 
 
 def create_app() -> FastAPI:
@@ -25,6 +25,7 @@ def create_app() -> FastAPI:
     app.include_router(auth.router)
     app.include_router(bills.router)
     app.include_router(cron.router)
+    app.include_router(expenses.router)
 
     return app
 
