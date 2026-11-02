@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Home as HomeIcon, Wallet, type LucideIcon } from 'lucide-react'
+import { CreditCard, Home as HomeIcon, Wallet, type LucideIcon } from 'lucide-react'
 
 type Module = {
   id: string
@@ -21,6 +21,15 @@ const modules: Module[] = [
     path: '/contas',
     icon: HomeIcon,
     status: 'Em breve',
+    available: true,
+  },
+  {
+    id: 'expenses',
+    title: 'Gastos',
+    description: 'Pagamentos do celular registrados automaticamente',
+    path: '/gastos',
+    icon: CreditCard,
+    status: '',
     available: true,
   },
   {

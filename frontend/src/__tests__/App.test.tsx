@@ -15,6 +15,7 @@ vi.mock('@/components/ProtectedRoute', () => ({
 vi.mock('@/pages/Login', () => ({ Login: () => <div>login-page</div> }))
 vi.mock('@/pages/Home', () => ({ Home: () => <div>home-page</div> }))
 vi.mock('@/pages/Bills', () => ({ Bills: () => <div>bills-page</div>, iconForBill: vi.fn() }))
+vi.mock('@/pages/Expenses', () => ({ Expenses: () => <div>expenses-page</div> }))
 
 function renderAt(path: string) {
   render(<MemoryRouter initialEntries={[path]}><App /></MemoryRouter>)
@@ -34,6 +35,11 @@ describe('App routing', () => {
   it('renders Bills at /contas', () => {
     renderAt('/contas')
     expect(screen.getByText('bills-page')).toBeInTheDocument()
+  })
+
+  it('renders Expenses at /gastos', () => {
+    renderAt('/gastos')
+    expect(screen.getByText('expenses-page')).toBeInTheDocument()
   })
 
   it('redirects unknown paths to /', () => {
