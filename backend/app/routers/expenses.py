@@ -9,7 +9,7 @@ The automation runs silently on the phone, so a rejected request means a lost
 expense. Ingestion is therefore lenient: an amount that can't be parsed is
 stored as null (with the raw payload kept) instead of failing the request.
 
-Rows sent with `teste: true` are stored with is_test=true; any query over real
+Rows sent with `test: true` are stored with is_test=true; any query over real
 spending must filter them out, and DELETE /api/expenses/test wipes them.
 """
 
@@ -54,22 +54,22 @@ def ingest_expense(payload: ExpenseIngest, x_shortcut_token: str | None = Header
 
     warning = None
     try:
-        amount = parse_amount(payload.valor)
+        amount = parse_amount(payload.amount)
     except ValueError:
         amount = None
     if amount is None:
         warning = "Valor ausente ou não reconhecido; gasto salvo sem valor"
 
-    occurred_at = _parse_occurred_at(payload.data)
+    occurred_at = _parse_occurred_at(payload.occurred_at)
 
     row = {
         "id": str(uuid4()),
         "amount": str(amount) if amount is not None else None,
-        "merchant": _clean(payload.estabelecimento),
-        "card": _clean(payload.cartao),
+        "merchant": _clean(payload.merchant),
+        "card": _clean(payload.card),
         "occurred_at": occurred_at.isoformat(),
-        "source": payload.origem,
-        "is_test": payload.teste,
+        "source": payload.source,
+        "is_test": payload.test,
         "raw": payload.model_dump(mode="json"),
     }
     saved = config.supabase.table("expenses").insert(row).execute().data[0]

@@ -57,12 +57,12 @@ def test_parse_amount_invalid_raises(raw):
 def test_ingest_without_configured_token_returns_401(monkeypatch):
     monkeypatch.delenv("SHORTCUT_TOKEN", raising=False)
     with TestClient(app) as c:
-        res = c.post("/api/expenses/ingest", json={"valor": "R$ 1,00"}, headers=HEADERS)
+        res = c.post("/api/expenses/ingest", json={"amount": "R$ 1,00"}, headers=HEADERS)
     assert res.status_code == 401
 
 
 def test_ingest_wrong_token_returns_401(client, fresh_supabase):
-    res = client.post("/api/expenses/ingest", json={"valor": "R$ 1,00"},
+    res = client.post("/api/expenses/ingest", json={"amount": "R$ 1,00"},
                       headers={"X-Shortcut-Token": "wrong"})
     assert res.status_code == 401
     fresh_supabase.table.return_value.insert.assert_not_called()
@@ -72,10 +72,10 @@ def test_ingest_wrong_token_returns_401(client, fresh_supabase):
 
 def test_ingest_saves_expense(client, fresh_supabase):
     res = client.post("/api/expenses/ingest", headers=HEADERS, json={
-        "valor": "R$ 42,90",
-        "estabelecimento": "  Padaria X ",
-        "cartao": "Nubank",
-        "data": "2026-11-02T14:32:00-03:00",
+        "amount": "R$ 42,90",
+        "merchant": "  Padaria X ",
+        "card": "Nubank",
+        "occurred_at": "2026-11-02T14:32:00-03:00",
     })
 
     assert res.status_code == 201
@@ -86,20 +86,20 @@ def test_ingest_saves_expense(client, fresh_supabase):
     assert row["occurred_at"] == "2026-11-02T14:32:00-03:00"
     assert row["source"] == "apple_pay"
     assert row["is_test"] is False
-    assert row["raw"]["valor"] == "R$ 42,90"
+    assert row["raw"]["amount"] == "R$ 42,90"
     assert res.json()["warning"] is None
     fresh_supabase.table.assert_called_with("expenses")
 
 
 def test_ingest_test_flag_marks_row(client, fresh_supabase):
     client.post("/api/expenses/ingest", headers=HEADERS,
-                json={"valor": "R$ 1,00", "teste": True})
+                json={"amount": "R$ 1,00", "test": True})
     assert _inserted(fresh_supabase)["is_test"] is True
 
 
 def test_ingest_unparseable_amount_still_saves(client, fresh_supabase):
     res = client.post("/api/expenses/ingest", headers=HEADERS,
-                      json={"valor": "???", "estabelecimento": "Loja"})
+                      json={"amount": "???", "merchant": "Loja"})
     assert res.status_code == 201
     assert _inserted(fresh_supabase)["amount"] is None
     assert res.json()["warning"]
@@ -107,13 +107,13 @@ def test_ingest_unparseable_amount_still_saves(client, fresh_supabase):
 
 def test_ingest_naive_date_assumes_sao_paulo(client, fresh_supabase):
     client.post("/api/expenses/ingest", headers=HEADERS,
-                json={"valor": "R$ 1,00", "data": "2026-11-02T14:32:00"})
+                json={"amount": "R$ 1,00", "occurred_at": "2026-11-02T14:32:00"})
     assert _inserted(fresh_supabase)["occurred_at"] == "2026-11-02T14:32:00-03:00"
 
 
 def test_ingest_unparseable_date_falls_back_to_now(client, fresh_supabase):
     res = client.post("/api/expenses/ingest", headers=HEADERS,
-                      json={"valor": "R$ 1,00", "data": "2 de nov. de 2026 14:32"})
+                      json={"amount": "R$ 1,00", "occurred_at": "2 de nov. de 2026 14:32"})
     assert res.status_code == 201
     assert _inserted(fresh_supabase)["occurred_at"].endswith("-03:00")
 
